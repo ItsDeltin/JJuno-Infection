@@ -14,7 +14,7 @@ namespace JjunoInfection
         const int RoundCount = 5;
         const int AICount = 3;
         const int ZombieCount = 2;
-        const int TestAICount = 9;
+        const int TestAICount = 4;
 
         static Profile[] LastZombies = new Profile[ZombieCount];
         static bool GameOver = false;
@@ -23,16 +23,64 @@ namespace JjunoInfection
 
         static void Main(string[] args)
         {
-            CustomGame cg = new CustomGame();
+            Game();
 
-            int currentRound = 0;
+            while (true)
+            {
+                Console.Write(">");
+                string input = Console.ReadLine();
+                string[] split = input.Split(' ');
+                string firstWord = split[0].ToLower();
 
-            // Set the OnGameOver and OnRoundOver events.
-            cg.OnGameOver += Cg_OnGameOver;
-            cg.OnRoundOver += (sender, e) => Cg_OnRoundOver(cg, sender, e);
+                switch (firstWord)
+                {
+                    case "save":
+                        Console.Write("Saving... ");
+                        Profile.Save();
+                        Console.WriteLine("Done.");
+                        break;
 
+                    case "filler-slots":
+                        Console.WriteLine($"Filler slots: {string.Join(", ", AISlots.OrderBy(slot => slot))}");
+                        break;
+
+                    case "profiles":
+                        var profiles = Profile.ProfileList;
+                        for (int i = 0; i < profiles.Count; i++)
+                            Console.WriteLine($"  {profiles[i].Name} ${profiles[i].JBucks}");
+                        break;
+
+                    case "help":
+                        Console.WriteLine("Commands:");
+                        Console.WriteLine("  save          Saves every player's profile.");
+                        Console.WriteLine("  profiles      Lists every profile.");
+                        Console.WriteLine("  filler-slots  Gets the filler AI slots.");
+                        break;
+
+                    default:
+                        Console.WriteLine($"Unknown command \"{firstWord}\"");
+                        goto case "help";
+                }
+            }
+        }
+
+        static void Game()
+        {
             Task.Run(() =>
             {
+                int currentRound = 0;
+
+                CustomGame cg = new CustomGame();
+
+                // Set the OnGameOver and OnRoundOver events.
+                cg.OnGameOver += Cg_OnGameOver;
+                cg.OnRoundOver += (sender, e) => Cg_OnRoundOver(cg, sender, e);
+
+                // Setup commands
+                cg.Commands.Listen = true;
+                // $BALANCE command
+                cg.Commands.ListenTo.Add(new ListenTo("$BALANCE", true, true, false, (cd) => Command_Balance(cg, cd)));
+
                 // Join the match channel.
                 cg.Chat.SwapChannel(Channel.Match);
 
@@ -93,10 +141,11 @@ namespace JjunoInfection
 
                         cg.SendServerToLobby();
 
+                        // Award jbucks
+                        // Give every initial zombie .5 jbucks
                         foreach (Profile initialZombie in LastZombies)
                             initialZombie?.Award(cg, "Initial zombie.", .5m);
 
-                        // Award jbucks
                         if (survivorsWin)
                         {
                             // Survivors win.
@@ -143,6 +192,9 @@ namespace JjunoInfection
                                 Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {currentRound + 1} rounds.", roundBonus);
                         }
 
+                        // Save player's J-bucks
+                        Profile.Save();
+
                         cg.Chat.SendChatMessage("Be notified of the next Zombie game! Join our discord http://discord.gg/xTVeqm");
 
                         GameOver = false;
@@ -158,51 +210,9 @@ namespace JjunoInfection
                     }
                 }
             });
-
-            while (true)
-            {
-                Console.Write(">");
-                string input = Console.ReadLine();
-                string[] split = input.Split(' ');
-                string firstWord = split[0].ToLower();
-
-                switch (firstWord)
-                {
-                    case "aislots":
-                        Console.WriteLine($"AI slots: {string.Join(", ", AISlots.OrderBy(slot => slot))}");
-                        break;
-
-                    case "profiles":
-                        var profiles = Profile.ProfileList;
-                        for (int i = 0; i < profiles.Count; i++)
-                            Console.WriteLine($"  {profiles[i].Name} ${profiles[i].JBucks}");
-                        break;
-
-                    default:
-                        Console.WriteLine($"Unknown command \"{firstWord}\"");
-                        Console.WriteLine("Commands:");
-                        Console.WriteLine("  aislots");
-                        Console.WriteLine("  profiles");
-                        break;
-                }
-            }
         }
 
-        private static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
-        {
-            RoundOver = true;
-        }
-
-        private static void Cg_OnGameOver(object sender, GameOverArgs e)
-        {
-            // Survivors won
-            GameOver = true;
-
-            CustomGame cg = (CustomGame)sender;
-            cg.Chat.SendChatMessage("Survivors win gg");
-        }
-
-        private static void SetupGame(CustomGame cg)
+        static void SetupGame(CustomGame cg)
         {
             // Make everyone queueing for the game queue for blue
             List<int> nonNeutralQueue = cg.GetSlots(SlotFlags.RedQueue);
@@ -220,13 +230,18 @@ namespace JjunoInfection
                 }
 
             // Swap players in red to blue.
+            bool updatedRed = false;
             foreach (int survivorInRed in cg.GetSlots(SlotFlags.Red).Where(slot => validRedSlots.Contains(slot)))
             {
                 cg.Interact.SwapToBlue(survivorInRed);
+                updatedRed = true;
             }
 
+            if (updatedRed)
+                cg.WaitForSlotUpdate();
+
             // Set starting zombies.
-            List<string> startingZombies = new List<string>(); // The list of names of the starting zombies.
+            Profile[] startingZombies = new Profile[ZombieCount];
 
             int currentZombieCount = cg./*GetCount*/GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).Count();
             List<int> survivorSlots = cg.GetSlots(SlotFlags.Blue /*| SlotFlags.PlayersOnly */).Where(slot => !AISlots.Contains(slot)).ToList();
@@ -235,16 +250,16 @@ namespace JjunoInfection
                 Profile zombieProfile = null;
 
                 int moveSlot = -1;
-                for (int i = 0; i < survivorSlots.Count; i++)
+                for (int i = 0; i < survivorSlots.Count && moveSlot == -1; i++)
                 {
-                    zombieProfile = Profile.GetProfileFromSlot(cg, i);
-                    if (zombieProfile == null)
-                        continue;
-                    bool wasLastZombie = LastZombies.Any(lz => lz == zombieProfile);
-                    if (wasLastZombie)
-                        continue;
-
-                    moveSlot = survivorSlots[i];
+                    zombieProfile = Profile.GetProfileFromSlot(cg, survivorSlots[i]);
+                    if (zombieProfile != null)
+                    {
+                        bool wasLastZombie = LastZombies.Any(lz => lz == zombieProfile);
+                        if (!wasLastZombie)
+                            moveSlot = survivorSlots[i];
+                    }
+                    else moveSlot = survivorSlots[i];
                 }
                 if (moveSlot == -1)
                     moveSlot = survivorSlots[0];
@@ -252,32 +267,46 @@ namespace JjunoInfection
                 // Swap the starting zombie to red.
                 cg.Interact.Move(moveSlot, validRedSlots[0]);
 
-                // Get the starting zombie's name.
-                startingZombies.Add(zombieProfile.Name);
-
                 // Set them as the last zombie
-                LastZombies[currentZombieCount] = zombieProfile;
+                startingZombies[currentZombieCount] = zombieProfile;
 
                 // Remove the starting zombie from the survivor slots.
-                survivorSlots.RemoveAt(moveSlot);
+                survivorSlots.Remove(moveSlot);
 
                 // Update the valid red slots.
                 validRedSlots.RemoveAt(0);
 
                 // Wait for the slots to update then get the new zombie count.
-                cg.WaitForSlotUpdate();
                 currentZombieCount = cg./*GetCount*/GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).Count();
             }
-
-            // Probably not needed.
-            for (int i = currentZombieCount + 1; i < LastZombies.Length; i++)
-                LastZombies[i] = null;
+            LastZombies = startingZombies;
 
             cg.StartGame();
 
-            startingZombies.RemoveAll(name => name == null);
-            if (startingZombies.Count > 0)
-                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombies)} are the starting zombies!");
+            List<string> startingZombiesNames = startingZombies.Select(sz => sz?.Name).ToList();
+            startingZombiesNames.RemoveAll(name => name == null);
+            if (startingZombiesNames.Count > 0)
+                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombiesNames)} {(startingZombiesNames.Count == 1 ? "is" : "are")} the starting zombie{(startingZombiesNames.Count == 1 ? "" : "s")}!");
+        }
+
+        static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
+        {
+            RoundOver = true;
+        }
+
+        static void Cg_OnGameOver(object sender, GameOverArgs e)
+        {
+            // Survivors won
+            GameOver = true;
+
+            CustomGame cg = (CustomGame)sender;
+            cg.Chat.SendChatMessage("Survivors win gg");
+        }
+
+        static void Command_Balance(CustomGame cg, CommandData cd)
+        {
+            Profile profile = Profile.GetProfile(cd.PlayerIdentity, cd.PlayerName);
+            cg.Chat.SendChatMessage($"{profile.Name}, you have {profile.JBucks} J-bucks.");
         }
     }
 }

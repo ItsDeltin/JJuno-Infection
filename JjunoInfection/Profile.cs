@@ -28,7 +28,8 @@ namespace JjunoInfection
             Name = Helpers.FirstLetterToUpperCase(name);
             Updated = true;
             ProfilePath = GetNewProfileFile();
-            _profileList.Add(this);
+            lock (ProfileListAccessLock)
+                _profileList.Add(this);
         }
 
         public void UpdateIdentifier(PlayerIdentity newIdentifier)
@@ -52,6 +53,7 @@ namespace JjunoInfection
         // Static
         private static readonly string ProfilesDirectory = AppDomain.CurrentDomain.BaseDirectory + "/Profiles/";
         private static List<Profile> _profileList = Load();
+        private static object ProfileListAccessLock = new object();
         public static IReadOnlyList<Profile> ProfileList { get { return _profileList.AsReadOnly(); } }
 
         public static Profile GetProfileFromSlot(CustomGame cg, int slot)
@@ -61,10 +63,10 @@ namespace JjunoInfection
             if (identifier == null)
                 return null;
 
-            return GetProfileFromIdentity(identifier) ?? new Profile(identifier, name);
+            return GetProfile(identifier, name);
         }
 
-        private static Profile GetProfileFromIdentity(PlayerIdentity identifier)
+        public static Profile GetProfile(PlayerIdentity identifier, string backupName)
         {
             foreach (Profile profile in _profileList)
                 if (Identity.Compare(identifier, profile.Identifier))
@@ -72,24 +74,28 @@ namespace JjunoInfection
                     profile.UpdateIdentifier(identifier);
                     return profile;
                 }
-            return null;
+            return new Profile(identifier, backupName);
         }
 
         public static void Save()
         {
             BinaryFormatter formatter = new BinaryFormatter();
 
-            foreach (Profile profile in _profileList)
-                if (profile.Updated)
-                {
-                    using (FileStream fs = File.Create(profile.ProfilePath))
-                        formatter.Serialize(fs, profile);
-                    profile.Updated = false;
-                }
+            lock (ProfileListAccessLock)
+                foreach (Profile profile in _profileList)
+                    if (profile.Updated)
+                    {
+                        using (FileStream fs = File.Create(profile.ProfilePath))
+                            formatter.Serialize(fs, profile);
+                        profile.Updated = false;
+                    }
         }
 
         private static List<Profile> Load()
         {
+            if (!Directory.Exists(ProfilesDirectory))
+                Directory.CreateDirectory(ProfilesDirectory);
+
             List<Profile> profiles = new List<Profile>();
 
             string[] files = Directory.GetFiles(ProfilesDirectory);
@@ -126,7 +132,7 @@ namespace JjunoInfection
 
         public void Award(CustomGame cg, string reason, decimal amount)
         {
-            cg.Chat.SendChatMessage($"{Name} +{amount} J-Bucks: {reason}");
+            cg.Chat.SendChatMessage($"{Name} +{amount} J-bucks: {reason}");
             AddJBucks(amount);
         }
 
