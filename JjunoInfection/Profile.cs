@@ -17,44 +17,61 @@ namespace JjunoInfection
         public PlayerIdentity Identifier { get; private set; }
         public decimal JBucks { get; private set; }
 
+        // Determines if a player's profile was updated by getting/selling j-bucks or their identifier being updated.
+        // If it was updated, their saved file on the system gets updated when Save() is called.
         [NonSerialized]
         private bool Updated = false;
+        // The path to the profile file.
         [NonSerialized]
         private string ProfilePath = null;
 
         private Profile(PlayerIdentity identifier, string name)
         {
+            // Create a profile.
             Identifier = identifier;
             Name = Helpers.FirstLetterToUpperCase(name);
-            Updated = true;
+            // Get the filepath this profile will be saved to.
             ProfilePath = GetNewProfileFile();
+            // Mark the profile as updated so it gets saved when Save() is called. 
+            Updated = true;
+            // Add the profile to the list of profiles.
             lock (ProfileListAccessLock)
                 _profileList.Add(this);
         }
 
         public void UpdateIdentifier(PlayerIdentity newIdentifier)
         {
+            // Dispose the memory of the old identier then replace it with the new identifier.
             Identifier.Dispose();
             Identifier = newIdentifier;
+            // Mark the profile as updated so it gets saved when Save() is called. 
             Updated = true;
         }
 
-        public bool Buy(decimal price)
+        public bool Buy(CustomGame cg, string product, decimal price)
         {
             if (JBucks >= price)
             {
                 JBucks -= price;
+                cg.Chat.SendChatMessage($"{Name} bought {product} for {price}! Remaining funds: {JBucks} J-bucks.");
                 Updated = true;
                 return true;
             }
             return false;
         }
 
+        public void Award(CustomGame cg, string reason, decimal amount)
+        {
+            cg.Chat.SendChatMessage($"{Name} +{amount} J-bucks: {reason}");
+            JBucks += amount;
+            Updated = true;
+        }
+
         // Static
-        private static readonly string ProfilesDirectory = AppDomain.CurrentDomain.BaseDirectory + "/Profiles/";
-        private static List<Profile> _profileList = Load();
-        private static object ProfileListAccessLock = new object();
-        public static IReadOnlyList<Profile> ProfileList { get { return _profileList.AsReadOnly(); } }
+        private static readonly string ProfilesDirectory = AppDomain.CurrentDomain.BaseDirectory + "/Profiles/"; // The folder on the file system storing the profiles.
+        private static List<Profile> _profileList = Load(); // The list of profiles.
+        private static object ProfileListAccessLock = new object(); // The lock for the profile list for thread safety.
+        public static IReadOnlyList<Profile> ProfileList { get { lock (ProfileListAccessLock) return _profileList.AsReadOnly(); } } // Read-only list of the profiles for public usage.
 
         public static Profile GetProfileFromSlot(CustomGame cg, int slot)
         {
@@ -68,17 +85,22 @@ namespace JjunoInfection
 
         public static Profile GetProfile(PlayerIdentity identifier, string backupName)
         {
-            foreach (Profile profile in _profileList)
-                if (Identity.Compare(identifier, profile.Identifier))
-                {
-                    profile.UpdateIdentifier(identifier);
-                    return profile;
-                }
+            // Gets a profile from an identifier and creates one if it is not found.
+
+            lock (ProfileListAccessLock)
+                foreach (Profile profile in _profileList)
+                    if (Identity.Compare(identifier, profile.Identifier))
+                    {
+                        profile.UpdateIdentifier(identifier);
+                        return profile;
+                    }
             return new Profile(identifier, backupName);
         }
 
         public static void Save()
         {
+            // Saves every profile that was updated.
+
             BinaryFormatter formatter = new BinaryFormatter();
 
             lock (ProfileListAccessLock)
@@ -93,6 +115,8 @@ namespace JjunoInfection
 
         private static List<Profile> Load()
         {
+            // Loads all profiles.
+
             if (!Directory.Exists(ProfilesDirectory))
                 Directory.CreateDirectory(ProfilesDirectory);
 
@@ -107,10 +131,6 @@ namespace JjunoInfection
                     try
                     {
                         Profile loadedProfile = (Profile)formatter.Deserialize(fs);
-
-#warning remove this after testing.
-                        if (loadedProfile.Updated)
-                            Console.WriteLine("Error: loaded profile has updated to true.");
 
                         loadedProfile.ProfilePath = file;
 
@@ -128,18 +148,6 @@ namespace JjunoInfection
             string newProfileFile;
             while (File.Exists(newProfileFile = ProfilesDirectory + profileIndex + ".jjprofile")) profileIndex++;
             return newProfileFile;
-        }
-
-        public void Award(CustomGame cg, string reason, decimal amount)
-        {
-            cg.Chat.SendChatMessage($"{Name} +{amount} J-bucks: {reason}");
-            AddJBucks(amount);
-        }
-
-        private void AddJBucks(decimal amount)
-        {
-            JBucks += amount;
-            Updated = true;
         }
     }
 }

@@ -105,6 +105,7 @@ namespace JjunoInfection
 
                 for (; ; )
                 {
+                    Thread.Sleep(10);
 
                     var deadSlots = cg.GetSlots(SlotFlags.Blue | SlotFlags.DeadOnly).Where(slot => !AISlots.Contains(slot));
 
@@ -192,7 +193,7 @@ namespace JjunoInfection
                                 Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {currentRound + 1} rounds.", roundBonus);
                         }
 
-                        // Save player's J-bucks
+                        // Save all player's J-bucks to the system.
                         Profile.Save();
 
                         cg.Chat.SendChatMessage("Be notified of the next Zombie game! Join our discord http://discord.gg/xTVeqm");
@@ -283,10 +284,13 @@ namespace JjunoInfection
 
             cg.StartGame();
 
-            List<string> startingZombiesNames = startingZombies.Select(sz => sz?.Name).ToList();
-            startingZombiesNames.RemoveAll(name => name == null);
-            if (startingZombiesNames.Count > 0)
-                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombiesNames)} {(startingZombiesNames.Count == 1 ? "is" : "are")} the starting zombie{(startingZombiesNames.Count == 1 ? "" : "s")}!");
+            List<string> startingZombieNames = startingZombies.Select(sz => sz?.Name).ToList();
+            for (int i = 0; i < startingZombieNames.Count; i++)
+                if (startingZombieNames[i] == null)
+                    startingZombieNames[i] = "<unknown>";
+
+            if (startingZombieNames.Count > 0)
+                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Count == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Count == 1 ? "" : "s")}!");
         }
 
         static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
