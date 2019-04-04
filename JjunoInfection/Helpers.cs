@@ -8,19 +8,17 @@ namespace JjunoInfection
 {
     static class Helpers
     {
-        public static string CommaSeperate(List<string> values)
+        public static string CommaSeperate(string[] values)
         {
-            if (values.Count == 0)
+            if (values.Length == 0)
                 return string.Empty;
 
-            if (values.Count == 1)
+            if (values.Length == 1)
                 return values[0];
 
-            string last = values[values.Count - 1];
+            string last = values[values.Length - 1];
 
-            values.RemoveAt(values.Count - 1);
-
-            return $"{string.Join(", ", values)} and {last}";
+            return $"{string.Join(", ", values, 0, values.Length - 1)} and {last}";
         }
 
         public static string FirstLetterToUpperCase(string s)

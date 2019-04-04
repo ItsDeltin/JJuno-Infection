@@ -14,7 +14,7 @@ namespace JjunoInfection
         const int RoundCount = 5;
         const int AICount = 3;
         const int ZombieCount = 2;
-        const int TestAICount = 4;
+        const int TestAICount = 12;
 
         static Profile[] LastZombies = new Profile[ZombieCount];
         static bool GameOver = false;
@@ -215,11 +215,6 @@ namespace JjunoInfection
 
         static void SetupGame(CustomGame cg)
         {
-            // Make everyone queueing for the game queue for blue
-            List<int> nonNeutralQueue = cg.GetSlots(SlotFlags.RedQueue);
-            foreach (int queueSlot in nonNeutralQueue)
-                cg.Interact.SwapToBlue(queueSlot);
-
             // Swap AI in blue to red.
             List<int> validRedSlots = new List<int> { 6, 7, 8, 9, 10, 11 }.Where(vs => !AISlots.Contains(vs)).ToList();
             for (int i = 0; i < AISlots.Count && validRedSlots.Count > 0; i++)
@@ -230,15 +225,31 @@ namespace JjunoInfection
                     validRedSlots.RemoveAt(0);
                 }
 
+            cg.Chat.ClosedChatIsDefault();
+
             // Swap players in red to blue.
-            bool updatedRed = false;
-            foreach (int survivorInRed in cg.GetSlots(SlotFlags.Red).Where(slot => validRedSlots.Contains(slot)))
+            while (true) // Players in queue can drop down into the red team, use a while loop instead of a for loop.
             {
-                cg.Interact.SwapToBlue(survivorInRed);
-                updatedRed = true;
+                var playersInRedSlots = cg.GetSlots(SlotFlags.Red).Where(slot => validRedSlots.Contains(slot)).ToList();
+                if (playersInRedSlots.Count == 0)
+                    break;
+
+                SlotInfo preswap = new SlotInfo();
+                cg.GetUpdatedSlots(preswap, SlotFlags.Red);
+
+                cg.Interact.SwapToBlue(playersInRedSlots[0]);
+
+                cg.WaitForSlotUpdate(preswap);
             }
 
-            if (updatedRed)
+            cg.Chat.OpenChatIsDefault();
+
+            // Make everyone queueing for the game queue for blue.
+            List<int> nonBlueQueue = cg.GetSlots(SlotFlags.RedQueue | SlotFlags.NeutralQueue);
+            foreach (int queueSlot in nonBlueQueue)
+                cg.Interact.SwapToBlue(queueSlot);
+
+            if (nonBlueQueue.Count > 0)
                 cg.WaitForSlotUpdate();
 
             // Set starting zombies.
@@ -282,15 +293,20 @@ namespace JjunoInfection
             }
             LastZombies = startingZombies;
 
+            // Make everyone queueing for the game queue for red.
+            List<int> nonRedQueue = cg.GetSlots(SlotFlags.BlueQueue | SlotFlags.NeutralQueue);
+            foreach (int queueSlot in nonRedQueue)
+                cg.Interact.SwapToRed(queueSlot);
+
             cg.StartGame();
 
-            List<string> startingZombieNames = startingZombies.Select(sz => sz?.Name).ToList();
-            for (int i = 0; i < startingZombieNames.Count; i++)
+            string[] startingZombieNames = startingZombies.Select(sz => sz?.Name).ToArray();
+            for (int i = 0; i < startingZombieNames.Length; i++)
                 if (startingZombieNames[i] == null)
                     startingZombieNames[i] = "<unknown>";
 
-            if (startingZombieNames.Count > 0)
-                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Count == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Count == 1 ? "" : "s")}!");
+            if (startingZombieNames.Length > 0)
+                cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Length == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Length == 1 ? "" : "s")}!");
         }
 
         static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
