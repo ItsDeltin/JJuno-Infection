@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using Deltin.CustomGameAutomation;
 
 namespace JjunoInfection
@@ -12,14 +13,17 @@ namespace JjunoInfection
     {
         // Constants
         const int RoundCount = 5;
-        const int AICount = 3;
+        const int AICount = 4;
         const int ZombieCount = 2;
-        const int TestAICount = 12;
+        const int TestAICount = 0;
+        const int StartSwappingAfter = 30; // Seconds
+        static OWEvent OverwatchEvent = OWEvent.None;
 
         static Profile[] LastZombies = new Profile[ZombieCount];
         static bool GameOver = false;
         static bool RoundOver = false;
         static List<int> AISlots;
+        static Random RandomMap = new Random();
 
         static void Main(string[] args)
         {
@@ -66,11 +70,22 @@ namespace JjunoInfection
 
         static void Game()
         {
+            Console.WriteLine("AI Slots:");
+            Console.Write(">");
+            AISlots = new List<int>();
+            string[] input = Console.ReadLine().Split(' ');
+            for (int i = 0; i < input.Length; i++)
+                if (int.TryParse(input[i], out int aislot))
+                    AISlots.Add(aislot);
+
             Task.Run(() =>
             {
                 int currentRound = 0;
 
-                CustomGame cg = new CustomGame();
+                CustomGame cg = new CustomGame(new CustomGameBuilder()
+                {
+                    OverwatchProcess = Process.GetProcessesByName("Overwatch")[1]
+                });
 
                 // Set the OnGameOver and OnRoundOver events.
                 cg.OnGameOver += Cg_OnGameOver;
@@ -85,6 +100,7 @@ namespace JjunoInfection
                 cg.Chat.SwapChannel(Channel.Match);
 
                 // Add filler AI
+                /*
                 AISlots = cg.AI.GetAISlots();
                 int addAICount = AICount - AISlots.Count;
                 if (addAICount > 0)
@@ -94,6 +110,16 @@ namespace JjunoInfection
                     Thread.Sleep(500);
                     AISlots = cg.AI.GetAISlots();
                 }
+                */
+                /*
+                cg.AI.RemoveAllBotsAuto();
+
+                SlotInfo slotInfo = new SlotInfo();
+                cg.GetUpdatedSlots(slotInfo);
+                cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, AICount);
+                Thread.Sleep(1000);
+                AISlots = cg.GetUpdatedSlots(slotInfo);
+                */
 
                 if (TestAICount > 0)
                 {
@@ -102,6 +128,8 @@ namespace JjunoInfection
                 }
 
                 SetupGame(cg);
+
+                Thread.Sleep(StartSwappingAfter * 1000);
 
                 for (; ; )
                 {
@@ -189,8 +217,9 @@ namespace JjunoInfection
 
                             // Add jbucks to profile
                             var zombieSlots = cg.GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).ToList();
-                            foreach (int zombieSlot in zombieSlots)
-                                Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {currentRound + 1} rounds.", roundBonus);
+                            if (roundBonus > 0)
+                                foreach (int zombieSlot in zombieSlots)
+                                    Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {currentRound + 1} rounds.", roundBonus);
                         }
 
                         // Save all player's J-bucks to the system.
@@ -203,18 +232,43 @@ namespace JjunoInfection
                         currentRound = 0;
 
                         SetupGame(cg);
+
+                        Thread.Sleep(StartSwappingAfter * 1000);
+                        Console.WriteLine("Scan starting!");
                     }
                     else if (RoundOver)
                     {
                         currentRound++;
                         cg.Chat.SendChatMessage($"Survivors need to win {RoundCount - currentRound} more rounds.");
+                        Thread.Sleep(StartSwappingAfter * 1000);
+                        RoundOver = false;
                     }
                 }
             });
         }
 
+        static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
+        {
+            RoundOver = true;
+        }
+
+        static void Cg_OnGameOver(object sender, GameOverArgs e)
+        {
+            // Survivors won
+            GameOver = true;
+
+            CustomGame cg = (CustomGame)sender;
+            cg.Chat.SendChatMessage("Survivors win gg");
+        }
+
         static void SetupGame(CustomGame cg)
         {
+            // Choose random map
+            Map[] maps = Map.GetMapsInGamemode(Gamemode.Elimination, OverwatchEvent);
+            Map nextMap = maps[RandomMap.Next(maps.Length - 1)];
+            cg.ToggleMap(Gamemode.Elimination, OverwatchEvent, ToggleAction.DisableAll, nextMap);
+            cg.Chat.SendChatMessage($"Next map: {nextMap.ShortName}");
+
             // Swap AI in blue to red.
             List<int> validRedSlots = new List<int> { 6, 7, 8, 9, 10, 11 }.Where(vs => !AISlots.Contains(vs)).ToList();
             for (int i = 0; i < AISlots.Count && validRedSlots.Count > 0; i++)
@@ -307,20 +361,6 @@ namespace JjunoInfection
 
             if (startingZombieNames.Length > 0)
                 cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Length == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Length == 1 ? "" : "s")}!");
-        }
-
-        static void Cg_OnRoundOver(CustomGame cg, object sender, EventArgs e)
-        {
-            RoundOver = true;
-        }
-
-        static void Cg_OnGameOver(object sender, GameOverArgs e)
-        {
-            // Survivors won
-            GameOver = true;
-
-            CustomGame cg = (CustomGame)sender;
-            cg.Chat.SendChatMessage("Survivors win gg");
         }
 
         static void Command_Balance(CustomGame cg, CommandData cd)
