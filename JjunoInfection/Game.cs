@@ -21,10 +21,18 @@ namespace JjunoInfection
         static object InitLock = new object();
         public static Process UsingProcess;
 
+        public int CurrentRound { get; private set; }
         public List<int> AISlots;
-        public GameState GameState;
+        public GameState GameState = GameState.InitialSetup;
         CancellationTokenSource CancelSource = new CancellationTokenSource();
         public List<string> InviteToGame = new List<string>();
+
+        // Discord !gameinfo data
+        public int       GIWaitingCount  { get; private set; }
+        public int       GISurvivorCount { get; private set; }
+        public int       GIZombieCount   { get; private set; }
+        public Stopwatch GIGameTime      { get; private set; } = new Stopwatch();
+        public Map       GICurrentMap    { get; private set; }
 
         public Game(List<int> aiSlots = null)
         {
@@ -58,20 +66,26 @@ namespace JjunoInfection
                 if (UsingProcess == null)
                 {
                     createdCustomGame = true;
-                    UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                    try
                     {
-                        AutomaticallyCreateCustomGame = true,
-                        CloseOverwatchProcessOnFailure = true,
-                        BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
-                        OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
-                    });
+                        UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                        {
+                            AutomaticallyCreateCustomGame = true,
+                            CloseOverwatchProcessOnFailure = true,
+                            BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
+                            OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
+                        });
+                    }
+                    catch (System.IO.FileNotFoundException)
+                    {
+                        throw new OverwatchStartFailedException("Could not find vital file for starting Overwatch.");
+                    }
                 }
                 cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
 
                 // Round variables
                 bool gameOver = false;
                 bool roundOver = false;
-                int currentRound = 0;
                 List<Tuple<int, bool>> vaccinated = new List<Tuple<int, bool>>();
                 Profile[] startingZombies = new Profile[ZombieCount];
 
@@ -105,6 +119,9 @@ namespace JjunoInfection
                     // Load the infection preset.
                     cg.Settings.LoadPreset(Program.Config.PresetName);
 
+                    // Set join setting
+                    cg.Settings.JoinSetting = Join.FriendsOnly;
+
                     cancelToken.ThrowIfCancellationRequested();
 
                     // Add AI if the custom game was created.
@@ -133,7 +150,6 @@ namespace JjunoInfection
                     // Set up the game
                     SetupGame(cg, ref startingZombies, cancelToken);
 
-                    GameState = GameState.Ingame;
                     VaccinateCommand.Listen = true;
 
                     for (; ; )
@@ -173,8 +189,8 @@ namespace JjunoInfection
                                 vaccinated.RemoveAt(i);
                             }
 
+                        // Check if zombies win.
                         bool survivorsWin = true;
-
                         List<int> survivorSlots = cg.GetSlots(SlotFlags.Blue /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).ToList();
                         if (survivorSlots.Count == 0 && !gameOver)
                         {
@@ -184,8 +200,13 @@ namespace JjunoInfection
                             cg.Chat.SendChatMessage("Survivors lose gg");
                         }
 
+                        // Update discord info
+                        GISurvivorCount = survivorSlots.Count;
+                        GIZombieCount = cg.GetSlots(SlotFlags.Red).Where(slot => !AISlots.Contains(slot)).Count();
+
                         if (gameOver)
                         {
+                            GIGameTime.Stop();
                             GameState = GameState.Setup;
                             VaccinateCommand.Listen = false;
                             vaccinated = new List<Tuple<int, bool>>();
@@ -223,7 +244,7 @@ namespace JjunoInfection
                             {
                                 // Zombies win.
                                 decimal roundBonus = 0;
-                                switch (currentRound)
+                                switch (CurrentRound)
                                 {
                                     // If the zombies win in 1 round, award 5 jbucks to every zombie.
                                     case 0:
@@ -243,7 +264,7 @@ namespace JjunoInfection
                                 var zombieSlots = cg.GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).ToList();
                                 if (roundBonus > 0)
                                     foreach (int zombieSlot in zombieSlots)
-                                        Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {currentRound + 1} rounds.", roundBonus);
+                                        Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {CurrentRound + 1} rounds.", roundBonus);
                             }
 
                             // Save all player's J-bucks to the system.
@@ -255,28 +276,27 @@ namespace JjunoInfection
 
                             gameOver = false;
                             roundOver = false;
-                            currentRound = 0;
+                            CurrentRound = 0;
 
                             SetupGame(cg, ref startingZombies, cancelToken);
 
-                            GameState = GameState.Ingame;
                             VaccinateCommand.Listen = true;
                         }
                         else if (roundOver)
                         {
                             // Indent current round.
-                            currentRound++;
+                            CurrentRound++;
 
                             // Activate vaccine powerups
                             for (int i = 0; i < vaccinated.Count; i++)
                                 vaccinated[i] = new Tuple<int, bool>(vaccinated[i].Item1, true);
 
-                            cg.Chat.SendChatMessage($"Survivors need to win {Program.Config.RoundCount - currentRound} more rounds.");
+                            cg.Chat.SendChatMessage($"Survivors need to win {Program.Config.RoundCount - CurrentRound} more rounds.");
 
                             // Wait for the black screen.
                             Thread.Sleep(StartSwappingAfter * 1000);
 
-                            if (currentRound == Program.Config.RoundCount)
+                            if (CurrentRound == Program.Config.RoundCount)
                                 cg.Chat.SendChatMessage("Last round, good luck!");
 
                             roundOver = false;
@@ -318,12 +338,17 @@ namespace JjunoInfection
 
         void SetupGame(CustomGame cg, ref Profile[] startingZombies, CancellationToken cancelToken)
         {
-            WaitForEnoughPlayers(cg, cancelToken);
-
             // Choose random map
             Map[] maps = Map.GetMapsInGamemode(Gamemode.Elimination, OverwatchEvent);
             Map nextMap = maps[RandomMap.Next(maps.Length - 1)];
+            GICurrentMap = nextMap;
             cg.ToggleMap(Gamemode.Elimination, OverwatchEvent, ToggleAction.DisableAll, nextMap);
+
+            GameState = GameState.Waiting;
+            WaitForEnoughPlayers(cg, cancelToken);
+            GameState = GameState.Setup;
+
+            // Print then next map to the chat.
             cg.Chat.SendChatMessage($"Next map: {nextMap.ShortName}");
 
             cancelToken.ThrowIfCancellationRequested();
@@ -440,6 +465,11 @@ namespace JjunoInfection
             if (startingZombieNames.Length > 0)
                 cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Length == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Length == 1 ? "" : "s")}!");
 
+            GameState = GameState.Ingame;
+            GIGameTime.Restart();
+            GISurvivorCount = survivorSlots.Count;
+            GIZombieCount = currentZombieCount;
+
             cancelToken.ThrowIfCancellationRequested();
             Thread.Sleep(StartSwappingAfter * 1000);
             cancelToken.ThrowIfCancellationRequested();
@@ -502,6 +532,7 @@ namespace JjunoInfection
                         cg.Chat.SendChatMessage($"Welcome, insert rules here later.");
                 }
                 previousPlayerCount = playerCount;
+                GIWaitingCount = playerCount;
 
                 if (playerCount >= Program.Config.MinPlayers)
                     break;
@@ -512,5 +543,13 @@ namespace JjunoInfection
         {
             CancelSource.Cancel();
         }
+    }
+
+    enum GameState
+    {
+        InitialSetup,
+        Setup,
+        Waiting,
+        Ingame,
     }
 }

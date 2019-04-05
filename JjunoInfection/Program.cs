@@ -73,7 +73,7 @@ namespace JjunoInfection
                                 Console.WriteLine("Error: No Overwatch Process!");
                             }
                         });
-                        
+
                         break;
 
                     case "stop":
@@ -117,11 +117,5 @@ namespace JjunoInfection
                 }
             }
         }
-    }
-
-    enum GameState
-    {
-        Ingame,
-        Setup,
     }
 }

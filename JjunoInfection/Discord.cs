@@ -100,13 +100,17 @@ namespace JjunoInfection
                 }
                 catch (OverwatchStartFailedException ex)
                 {
-                    botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup failed: {ex}");
+                    botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup failed: {ex.Message}");
                 }
                 catch (InitializedException)
                 {
                     botReply.ModifyAsync(msg => msg.Content = "Starting... Error: Already running!");
                 }
                 catch (OverwatchClosedException) { }
+                catch (Exception ex)
+                {
+                    botReply.ModifyAsync(msg => msg.Content = $"Starting... Error: {ex}");
+                }
             });
         }
 
@@ -120,12 +124,6 @@ namespace JjunoInfection
                 await ReplyAsync(Program.NotInitialized);
             else
             {
-                if (Program.Game == null)
-                {
-                    await ReplyAsync(Program.NotInitialized);
-                    return;
-                }
-
                 IUserMessage botReply = await ReplyAsync("Stopping... ");
                 
                 _ = Task.Run(() =>
@@ -182,18 +180,65 @@ namespace JjunoInfection
                 await ReplyAsync($"Could not find the player {battletag}.");
         }
 
+        [Command("gameinfo")]
+        public async Task GameInfoAsync()
+        {
+            if (Program.Game == null)
+            {
+                await ReplyAsync(Program.NotInitialized);
+                return;
+            }
+
+            string[] send = null;
+
+            switch (Program.Game.GameState)
+            {
+                case GameState.InitialSetup:
+                    send = new string[] {
+                        "**Setting up bot**"
+                    };
+                    break;
+
+                case GameState.Setup:
+                    send = new string[] {
+                        $"**Setting up next game**",
+                        $"Map: {Program.Game.GICurrentMap.ShortName}"
+                    };
+                    break;
+
+                case GameState.Waiting:
+                    send = new string[] {
+                        $"**Waiting for players**",
+                        $"Map: `{Program.Game.GICurrentMap.ShortName}`",
+                        $"Player count: `{Program.Game.GIWaitingCount}/{Program.Config.PlayerCount}` *(Minimum: {Program.Config.MinPlayers})*"
+                    };
+                    break;
+
+                case GameState.Ingame:
+                    send = new string[] {
+                        $"**Ingame**",
+                        $"Map: `{Program.Game.GICurrentMap.ShortName}`, Round: `{Program.Game.CurrentRound}`, Time: `{Program.Game.GIGameTime.Elapsed.ToString("mm\\:ss")}`",
+                        $"**{Program.Game.GISurvivorCount}** Survivors vs **{Program.Game.GIZombieCount}** Zombies"
+                    };
+                    break;
+            }
+
+            await ReplyAsync($"{string.Join("\n", send)}");
+        }
+
         [Command("help")]
         public async Task HelpAsync()
         {
             string[] help = new string[]
             {
                 "Commands:",
-                "    join <battletag>  Join the game. Battletag is case sensitive.",
-                "    profiles          List all profiles and their worth.",
+                "    !join <battletag>  Join the game. Battletag is case sensitive.",
+                "    !profiles          List all profiles and their worth.",
+                "    !gameinfo          Get the info of the current match.",
                 "  Admins:",
-                "    start             Start the bot.",
-                "    stop              Stop the bot.",
-                "    kill              Kill the Overwatch process the bot is using.",
+                "    !start             Start the bot.",
+                "    !stop              Stop the bot.",
+                "    !kill              Kill the Overwatch process the bot is using.",
             };
             await ReplyAsync($"```{string.Join("\n", help)}```");
         }
