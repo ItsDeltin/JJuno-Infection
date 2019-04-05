@@ -57,6 +57,7 @@ namespace JjunoInfection
                 Updated = true;
                 return true;
             }
+            cg.Chat.SendChatMessage($"{Name}: You can not afford {product} for {price} J-bucks! Funds: {JBucks} J-bucks.");
             return false;
         }
 

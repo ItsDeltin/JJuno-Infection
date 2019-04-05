@@ -9,143 +9,51 @@ using Deltin.CustomGameAutomation;
 
 namespace JjunoInfection
 {
-    class Program
+    class Game
     {
-        // Constants
-        const int RoundCount = 5;
-        const int AICount = 4;
-        const int ZombieCount = 2;
-        const int TestAICount = 0;
         const int StartSwappingAfter = 30; // Seconds
-        static OWEvent OverwatchEvent = OWEvent.None;
-
-        public static Config Config = Config.ParseConfig();
-
-        static GameState GameState = GameState.Setup;
-        static Profile[] LastZombies = new Profile[ZombieCount];
-        static List<int> AISlots;
+        const int ZombieCount = 2;
 
         static Random RandomMap = new Random();
+        static OWEvent OverwatchEvent = OWEvent.None;
 
-        public static bool Initialized
+        public List<int> AISlots;
+        public Process UsingProcess;
+        public GameState GameState;
+
+        public Game(bool createGame, CancellationToken cancelToken)
         {
-            get
-            {
-                lock (InitLock) return _init;
-            }
-            set
-            {
-                _init = value;
-            }
-        }
-        static bool _init = false;
-        static object InitLock = new object();
-        public static Process UsingProcess = null;
-        public static CancellationTokenSource CancelSource = new CancellationTokenSource();
-
-        static void Main(string[] args)
-        {
-            Task.Run(() =>
-            {
-                new Discord().RunBotAsync().GetAwaiter().GetResult();
-            });
-
-            while (true)
-            {
-                Console.Write(">");
-                string input = Console.ReadLine();
-                string[] split = input.Split(' ');
-                string firstWord = split[0].ToLower();
-
-                switch (firstWord)
-                {
-                    case "start":
-                        try
-                        {
-                            Game(false);
-                        }
-                        catch (MissingOverwatchProcessException)
-                        {
-                            Console.WriteLine("Error: No Overwatch Process!");
-                        }
-                        catch (InitializedException)
-                        {
-                            Console.WriteLine("Error: Already initialized!");
-                        }
-                        break;
-
-                    case "save":
-                        Console.Write("Saving... ");
-                        Profile.Save();
-                        Console.WriteLine("Done.");
-                        break;
-
-                    case "filler-slots":
-                        Console.WriteLine($"Filler slots: {string.Join(", ", AISlots.OrderBy(slot => slot))}");
-                        break;
-
-                    case "profiles":
-                        var profiles = Profile.ProfileList;
-                        for (int i = 0; i < profiles.Count; i++)
-                            Console.WriteLine($"  {profiles[i].Name} ${profiles[i].JBucks}");
-                        break;
-
-                    case "help":
-                        Console.WriteLine("Commands:");
-                        Console.WriteLine("  save          Saves every player's profile.");
-                        Console.WriteLine("  profiles      Lists every profile.");
-                        Console.WriteLine("  filler-slots  Gets the filler AI slots.");
-                        break;
-
-                    case "":
-                        break;
-
-                    default:
-                        Console.WriteLine($"Unknown command \"{firstWord}\"");
-                        goto case "help";
-                }
-            }
-        }
-
-        public static void Game(bool createGame)
-        {
-            CancellationToken cancelToken = CancelSource.Token;
-
-            if (Initialized)
+            if (Program.Initialized)
                 throw new InitializedException();
 
             CustomGame cg;
-            lock (InitLock)
+
+            if (!createGame)
             {
-                if (!createGame)
-                {
-                    Console.Write("AI Slots: ");
-                    AISlots = new List<int>();
-                    string[] input = Console.ReadLine().Split(' ');
-                    for (int i = 0; i < input.Length; i++)
-                        if (int.TryParse(input[i], out int aislot))
-                            AISlots.Add(aislot);
-                }
-                
-                if (cancelToken.IsCancellationRequested)
-                {
-                    AISlots = null;
-                    return;
-                }
-
-                UsingProcess = CustomGame.GetOverwatchProcess();
-                if (createGame)
-                    UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
-                    {
-                        AutomaticallyCreateCustomGame = true,
-                        CloseOverwatchProcessOnFailure = true,
-                        BattlenetExecutableFilePath = Config.BattlenetExecutable,
-                        OverwatchSettingsFilePath = Config.OverwatchSettingsFile
-                    });
-                cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
-
-                Initialized = true;
+                Console.Write("AI Slots: ");
+                AISlots = new List<int>();
+                string[] input = Console.ReadLine().Split(' ');
+                for (int i = 0; i < input.Length; i++)
+                    if (int.TryParse(input[i], out int aislot))
+                        AISlots.Add(aislot);
             }
+
+            if (cancelToken.IsCancellationRequested)
+            {
+                AISlots = null;
+                return;
+            }
+
+            UsingProcess = CustomGame.GetOverwatchProcess();
+            if (createGame)
+                UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                {
+                    AutomaticallyCreateCustomGame = true,
+                    CloseOverwatchProcessOnFailure = true,
+                    BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
+                    OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
+                });
+            cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
 
             Task.Run(() =>
             {
@@ -155,6 +63,7 @@ namespace JjunoInfection
                 bool roundOver = false;
                 int currentRound = 0;
                 List<Profile> vaccinated = new List<Profile>();
+                Profile[] startingZombies = new Profile[ZombieCount];
 
                 try
                 {
@@ -163,7 +72,7 @@ namespace JjunoInfection
                     cg.OnRoundOver += (sender, e) => Cg_OnRoundOver(ref roundOver, sender, e);
 
                     // Setup commands
-                    ListenTo BalanceCommand   = new ListenTo("$BALANCE",   listen: true,  getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
+                    ListenTo BalanceCommand = new ListenTo("$BALANCE", listen: true, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
                     ListenTo VaccinateCommand = new ListenTo("$VACCINATE", listen: false, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Vaccinate(cg, cd, playerTracker, vaccinated));
                     cg.Commands.Listen = true;
                     cg.Commands.ListenTo.Add(BalanceCommand);
@@ -173,28 +82,21 @@ namespace JjunoInfection
                     cg.Chat.SwapChannel(Channel.Match);
 
                     // Load the infection preset.
-                    cg.Settings.LoadPreset(Config.PresetName);
+                    cg.Settings.LoadPreset(Program.Config.PresetName);
 
                     // Add AI if the custom game was created.
                     if (createGame)
                     {
                         Thread.Sleep(1000);
                         cg.Interact.Move(0, 12);
-                        cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, AICount);
+                        cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, 12 - Program.Config.PlayerCount);
                         AISlots = cg.GetSlots(SlotFlags.All | SlotFlags.AIOnly);
                     }
 
                     cancelToken.ThrowIfCancellationRequested();
 
-                    // Add filler AI
-                    if (TestAICount > 0)
-                    {
-                        cg.AI.AddAI(AIHero.McCree, Difficulty.Medium, Team.BlueAndRed, TestAICount);
-                        cg.WaitForSlotUpdate();
-                    }
-
                     // Set up the game
-                    SetupGame(cg, playerTracker, cancelToken);
+                    SetupGame(cg, playerTracker, ref startingZombies, cancelToken);
 
                     GameState = GameState.Ingame;
                     VaccinateCommand.Listen = true;
@@ -253,7 +155,7 @@ namespace JjunoInfection
 
                             // Award jbucks
                             // Give every initial zombie .5 jbucks
-                            foreach (Profile initialZombie in LastZombies)
+                            foreach (Profile initialZombie in startingZombies)
                                 initialZombie?.Award(cg, "Initial zombie.", .5m);
 
                             if (survivorsWin)
@@ -314,7 +216,7 @@ namespace JjunoInfection
                             roundOver = false;
                             currentRound = 0;
 
-                            SetupGame(cg, playerTracker, cancelToken);
+                            SetupGame(cg, playerTracker, ref startingZombies, cancelToken);
 
                             GameState = GameState.Ingame;
                             VaccinateCommand.Listen = true;
@@ -322,7 +224,7 @@ namespace JjunoInfection
                         else if (roundOver)
                         {
                             currentRound++;
-                            cg.Chat.SendChatMessage($"Survivors need to win {RoundCount - currentRound} more rounds.");
+                            cg.Chat.SendChatMessage($"Survivors need to win {Program.Config.RoundCount - currentRound} more rounds.");
                             Thread.Sleep(StartSwappingAfter * 1000);
                             roundOver = false;
                         }
@@ -340,7 +242,6 @@ namespace JjunoInfection
                 {
                     cg.Dispose();
                     playerTracker.Dispose();
-                    Initialized = false;
                     Profile.Save();
                 }
             });
@@ -360,7 +261,7 @@ namespace JjunoInfection
             cg.Chat.SendChatMessage("Survivors win gg");
         }
 
-        static void SetupGame(CustomGame cg, PlayerTracker playerTracker, CancellationToken cancelToken)
+        void SetupGame(CustomGame cg, PlayerTracker playerTracker, ref Profile[] startingZombies, CancellationToken cancelToken)
         {
             // Choose random map
             Map[] maps = Map.GetMapsInGamemode(Gamemode.Elimination, OverwatchEvent);
@@ -414,7 +315,7 @@ namespace JjunoInfection
             cancelToken.ThrowIfCancellationRequested();
 
             // Set starting zombies.
-            Profile[] startingZombies = new Profile[ZombieCount];
+            Profile[] newStartingZombies = new Profile[ZombieCount];
 
             int currentZombieCount = cg./*GetCount*/GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).Count();
             List<int> survivorSlots = cg.GetSlots(SlotFlags.Blue /*| SlotFlags.PlayersOnly */).Where(slot => !AISlots.Contains(slot)).ToList();
@@ -430,7 +331,7 @@ namespace JjunoInfection
                     zombieProfile = Profile.GetProfileFromSlot(cg, survivorSlots[i]);
                     if (zombieProfile != null)
                     {
-                        bool wasLastZombie = LastZombies.Any(lz => lz == zombieProfile);
+                        bool wasLastZombie = startingZombies.Any(lz => lz == zombieProfile);
                         if (!wasLastZombie)
                             moveSlot = survivorSlots[i];
                     }
@@ -446,7 +347,7 @@ namespace JjunoInfection
                 cg.Interact.Move(moveSlot, validRedSlots[0]);
 
                 // Set them as the last zombie
-                startingZombies[currentZombieCount] = zombieProfile;
+                newStartingZombies[currentZombieCount] = zombieProfile;
 
                 // Remove the starting zombie from the survivor slots.
                 survivorSlots.Remove(moveSlot);
@@ -457,7 +358,7 @@ namespace JjunoInfection
                 // Wait for the slots to update then get the new zombie count.
                 currentZombieCount = cg./*GetCount*/GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).Count();
             }
-            LastZombies = startingZombies;
+            newStartingZombies = startingZombies;
 
             cancelToken.ThrowIfCancellationRequested();
 
@@ -490,13 +391,13 @@ namespace JjunoInfection
             cancelToken.ThrowIfCancellationRequested();
         }
 
-        static void Command_Balance(CustomGame cg, CommandData cd)
+        void Command_Balance(CustomGame cg, CommandData cd)
         {
             Profile profile = Profile.GetProfile(cd.PlayerIdentity, cd.PlayerName);
             cg.Chat.SendChatMessage($"{profile.Name}, you have {profile.JBucks} J-bucks.");
         }
 
-        static void Command_Vaccinate(CustomGame cg, CommandData cd, PlayerTracker playerTracker, List<Profile> vaccinated)
+        void Command_Vaccinate(CustomGame cg, CommandData cd, PlayerTracker playerTracker, List<Profile> vaccinated)
         {
             if (GameState != GameState.Ingame)
                 return;
@@ -508,11 +409,5 @@ namespace JjunoInfection
                     vaccinated.Add(profile);
             }
         }
-    }
-
-    enum GameState
-    {
-        Ingame,
-        Setup
     }
 }
