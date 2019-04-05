@@ -16,67 +16,88 @@ namespace JjunoInfection
 
         static Random RandomMap = new Random();
         static OWEvent OverwatchEvent = OWEvent.None;
+        public static bool Initialized { get { lock (InitLock) return _init; } set { _init = value; } }
+        static bool _init = false;
+        static object InitLock = new object();
+        public static Process UsingProcess;
 
         public List<int> AISlots;
-        public Process UsingProcess;
         public GameState GameState;
+        CancellationTokenSource CancelSource = new CancellationTokenSource();
+        public List<string> InviteToGame = new List<string>();
 
-        public Game(bool createGame, CancellationToken cancelToken)
+        public Game(List<int> aiSlots = null)
         {
-            if (Program.Initialized)
+            AISlots = aiSlots;
+        }
+
+        /// <summary>
+        /// Starts the game.
+        /// </summary>
+        /// <param name="createGame"></param>
+        /// <param name="cancelToken"></param>
+        /// <exception cref="OperationCanceledException">Game stopped.</exception>
+        /// <exception cref="OverwatchStartFailedException">Overwatch failed to start.</exception>
+        /// <exception cref="OverwatchClosedException">Overwatch closed.</exception>
+        /// <exception cref="InitializedException">This was already initialized.</exception>
+        /// <exception cref="MissingOverwatchProcessException">The Overwatch process is missing.</exception>
+        public void Play()
+        {
+            CancellationToken cancelToken = CancelSource.Token;
+
+            if (Initialized)
                 throw new InitializedException();
+            Initialized = true;
 
-            CustomGame cg;
-
-            if (!createGame)
+            try
             {
-                Console.Write("AI Slots: ");
-                AISlots = new List<int>();
-                string[] input = Console.ReadLine().Split(' ');
-                for (int i = 0; i < input.Length; i++)
-                    if (int.TryParse(input[i], out int aislot))
-                        AISlots.Add(aislot);
-            }
+                CustomGame cg;
 
-            if (cancelToken.IsCancellationRequested)
-            {
-                AISlots = null;
-                return;
-            }
-
-            UsingProcess = CustomGame.GetOverwatchProcess();
-            if (createGame)
-                UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                UsingProcess = CustomGame.GetOverwatchProcess();
+                bool createdCustomGame = false;
+                if (UsingProcess == null)
                 {
-                    AutomaticallyCreateCustomGame = true,
-                    CloseOverwatchProcessOnFailure = true,
-                    BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
-                    OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
-                });
-            cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
+                    createdCustomGame = true;
+                    UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                    {
+                        AutomaticallyCreateCustomGame = true,
+                        CloseOverwatchProcessOnFailure = true,
+                        BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
+                        OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
+                    });
+                }
+                cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
 
-            Task.Run(() =>
-            {
                 // Round variables
-                PlayerTracker playerTracker = new PlayerTracker();
                 bool gameOver = false;
                 bool roundOver = false;
                 int currentRound = 0;
-                List<Profile> vaccinated = new List<Profile>();
+                List<Tuple<int, bool>> vaccinated = new List<Tuple<int, bool>>();
                 Profile[] startingZombies = new Profile[ZombieCount];
 
                 try
                 {
+                    cancelToken.ThrowIfCancellationRequested();
+
                     // Set the OnGameOver and OnRoundOver events.
                     cg.OnGameOver += (sender, e) => Cg_OnGameOver(ref gameOver, sender, e);
                     cg.OnRoundOver += (sender, e) => Cg_OnRoundOver(ref roundOver, sender, e);
 
                     // Setup commands
-                    ListenTo BalanceCommand = new ListenTo("$BALANCE", listen: true, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
-                    ListenTo VaccinateCommand = new ListenTo("$VACCINATE", listen: false, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Vaccinate(cg, cd, playerTracker, vaccinated));
+                    ListenTo ShopCommand      = new ListenTo("$SHOP",      listen: true,  getNameAndProfile: false, checkIfFriend: false, callback: (cd) => Command_Shop(cg, cd));
+                    ListenTo BalanceCommand   = new ListenTo("$BALANCE",   listen: true,  getNameAndProfile: true,  checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
+                    ListenTo VaccinateCommand = new ListenTo("$VACCINATE", listen: false, getNameAndProfile: true,  checkIfFriend: false, callback: (cd) => Command_Vaccinate(cg, cd, vaccinated));
                     cg.Commands.Listen = true;
+                    cg.Commands.ListenTo.Add(ShopCommand);
                     cg.Commands.ListenTo.Add(BalanceCommand);
                     cg.Commands.ListenTo.Add(VaccinateCommand);
+
+                    OverwatchState state = cg.Reset();
+                    if (state == OverwatchState.MainMenu)
+                    {
+                        cg.CreateCustomGame();
+                        createdCustomGame = true;
+                    }
 
                     // Join the match channel.
                     cg.Chat.SwapChannel(Channel.Match);
@@ -84,19 +105,33 @@ namespace JjunoInfection
                     // Load the infection preset.
                     cg.Settings.LoadPreset(Program.Config.PresetName);
 
+                    cancelToken.ThrowIfCancellationRequested();
+
                     // Add AI if the custom game was created.
-                    if (createGame)
+                    if (createdCustomGame)
                     {
-                        Thread.Sleep(1000);
                         cg.Interact.Move(0, 12);
                         cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, 12 - Program.Config.PlayerCount);
-                        AISlots = cg.GetSlots(SlotFlags.All | SlotFlags.AIOnly);
+                        cg.WaitForSlotUpdate();
+                        AISlots = cg.GetSlots(SlotFlags.BlueAndRed);
+                    }
+                    // If the AI slots were not pre-filled, attempt to get them automatically. This can be inaccurate,
+                    else if (AISlots == null)
+                    {
+                        AISlots = cg.GetSlots(SlotFlags.BlueAndRed | SlotFlags.AIOnly);
+                        int addAICount = 12 - Program.Config.PlayerCount - AISlots.Count;
+                        if (addAICount > 0)
+                        {
+                            cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, addAICount);
+                            cg.WaitForSlotUpdate();
+                            AISlots = cg.GetSlots(SlotFlags.BlueAndRed | SlotFlags.AIOnly);
+                        }
                     }
 
                     cancelToken.ThrowIfCancellationRequested();
 
                     // Set up the game
-                    SetupGame(cg, playerTracker, ref startingZombies, cancelToken);
+                    SetupGame(cg, ref startingZombies, cancelToken);
 
                     GameState = GameState.Ingame;
                     VaccinateCommand.Listen = true;
@@ -125,13 +160,18 @@ namespace JjunoInfection
                             }
                         }
 
-                        cg.TrackPlayers(playerTracker, SlotFlags.Red | SlotFlags.PlayersOnly);
+                        // Invite players
+                        if (InviteToGame.Count > 0)
+                            cg.InvitePlayer(InviteToGame[0], Team.BlueAndRed);
+
+                        // Use powerups
                         for (int i = vaccinated.Count - 1; i >= 0; i--)
-                        {
-                            int vaccinatedSlot = playerTracker.SlotFromPlayerIdentity(vaccinated[i].Identifier);
-                            cg.Interact.SwapToBlue(vaccinatedSlot);
-                            vaccinated.RemoveAt(i);
-                        }
+                            // If the vaccine powerup is activated
+                            if (vaccinated[i].Item2)
+                            {
+                                cg.Interact.SwapToBlue(vaccinated[i].Item1);
+                                vaccinated.RemoveAt(i);
+                            }
 
                         bool survivorsWin = true;
 
@@ -148,6 +188,7 @@ namespace JjunoInfection
                         {
                             GameState = GameState.Setup;
                             VaccinateCommand.Listen = false;
+                            vaccinated = new List<Tuple<int, bool>>();
 
                             cg.SendServerToLobby();
 
@@ -216,35 +257,49 @@ namespace JjunoInfection
                             roundOver = false;
                             currentRound = 0;
 
-                            SetupGame(cg, playerTracker, ref startingZombies, cancelToken);
+                            SetupGame(cg, ref startingZombies, cancelToken);
 
                             GameState = GameState.Ingame;
                             VaccinateCommand.Listen = true;
                         }
                         else if (roundOver)
                         {
+                            // Indent current round.
                             currentRound++;
+
+                            // Activate vaccine powerups
+                            for (int i = 0; i < vaccinated.Count; i++)
+                                vaccinated[i] = new Tuple<int, bool>(vaccinated[i].Item1, true);
+
                             cg.Chat.SendChatMessage($"Survivors need to win {Program.Config.RoundCount - currentRound} more rounds.");
+
+                            // Wait for the black screen.
                             Thread.Sleep(StartSwappingAfter * 1000);
+
+                            if (currentRound == Program.Config.RoundCount)
+                                cg.Chat.SendChatMessage("Last round, good luck!");
+
                             roundOver = false;
                         }
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    Console.WriteLine("Bot stopped.");
-                }
-                catch (OverwatchClosedException)
-                {
-                    Console.WriteLine("Stopping bot, Overwatch closed.");
-                }
                 finally
                 {
                     cg.Dispose();
-                    playerTracker.Dispose();
                     Profile.Save();
                 }
-            });
+            }
+            catch (OperationCanceledException ex)
+            {
+                CancelSource.Dispose();
+                CancelSource = new CancellationTokenSource();
+                throw ex;
+            }
+            finally
+            {
+                Initialized = false;
+                Program.Game = null;
+            }
         }
 
         static void Cg_OnRoundOver(ref bool roundOver, object sender, EventArgs e)
@@ -261,8 +316,10 @@ namespace JjunoInfection
             cg.Chat.SendChatMessage("Survivors win gg");
         }
 
-        void SetupGame(CustomGame cg, PlayerTracker playerTracker, ref Profile[] startingZombies, CancellationToken cancelToken)
+        void SetupGame(CustomGame cg, ref Profile[] startingZombies, CancellationToken cancelToken)
         {
+            WaitForEnoughPlayers(cg, cancelToken);
+
             // Choose random map
             Map[] maps = Map.GetMapsInGamemode(Gamemode.Elimination, OverwatchEvent);
             Map nextMap = maps[RandomMap.Next(maps.Length - 1)];
@@ -369,9 +426,6 @@ namespace JjunoInfection
 
             cancelToken.ThrowIfCancellationRequested();
 
-            // Update the tracker.
-            cg.TrackPlayers(playerTracker, SlotFlags.Red | SlotFlags.PlayersOnly);
-
             // Start the game.
             cg.StartGame();
 
@@ -391,23 +445,72 @@ namespace JjunoInfection
             cancelToken.ThrowIfCancellationRequested();
         }
 
+        void Command_Shop(CustomGame cg, CommandData cd)
+        {
+            cg.Chat.SendChatMessage(Helpers.FormatMessage(
+                "♦ Shop ♦", 
+                "3 J-bucks: $VACCINATE <slot 1-6>"
+                ));
+        }
+
         void Command_Balance(CustomGame cg, CommandData cd)
         {
             Profile profile = Profile.GetProfile(cd.PlayerIdentity, cd.PlayerName);
             cg.Chat.SendChatMessage($"{profile.Name}, you have {profile.JBucks} J-bucks.");
         }
 
-        void Command_Vaccinate(CustomGame cg, CommandData cd, PlayerTracker playerTracker, List<Profile> vaccinated)
+        void Command_Vaccinate(CustomGame cg, CommandData cd, List<Tuple<int, bool>> vaccinated)
         {
             if (GameState != GameState.Ingame)
                 return;
 
             Profile profile = Profile.GetProfile(cd.PlayerIdentity, cd.PlayerName);
-            if (CustomGame.IsSlotRed(playerTracker.SlotFromPlayerIdentity(cd.PlayerIdentity)))
+            int.TryParse(cd.Command.Split(' ').ElementAtOrDefault(1), out int slot);
+            if (slot > 0 && CustomGame.IsSlotRed(slot + 5))
             {
                 if (profile.Buy(cg, "vaccine", 3))
-                    vaccinated.Add(profile);
+                    vaccinated.Add(new Tuple<int, bool>(slot + 5, false));
             }
+            else
+                cg.Chat.SendChatMessage("Syntax: $VACCINATE <slot 1-6> (Press L then choose the red slot number.)");
+        }
+
+        void WaitForEnoughPlayers(CustomGame cg, CancellationToken cancelToken)
+        {
+            int previousPlayerCount = 0;
+            for (; ; )
+            {
+                cancelToken.ThrowIfCancellationRequested();
+                Thread.Sleep(10);
+
+                for (int i = InviteToGame.Count - 1; i >= 0; i--)
+                {
+                    cg.InvitePlayer(InviteToGame[i], Team.BlueAndRed);
+                    InviteToGame.RemoveAt(i);
+                }
+
+                int playerCount = cg.GetSlots(SlotFlags.BlueAndRed | SlotFlags.IngameOnly).Where(slot => !AISlots.Contains(slot)).Count();
+
+                if (previousPlayerCount < playerCount)
+                {
+                    int left = Program.Config.MinPlayers - playerCount;
+                    if (left > 1)
+                        cg.Chat.SendChatMessage($"Welcome, insert rules here later. Waiting for {left} more players.");
+                    if (left == 1)
+                        cg.Chat.SendChatMessage($"Welcome, insert rules here later. Waiting for 1 more player.");
+                    if (left < 1)
+                        cg.Chat.SendChatMessage($"Welcome, insert rules here later.");
+                }
+                previousPlayerCount = playerCount;
+
+                if (playerCount >= Program.Config.MinPlayers)
+                    break;
+            }
+        }
+
+        public void Stop()
+        {
+            CancelSource.Cancel();
         }
     }
 }

@@ -28,7 +28,7 @@ namespace JjunoInfection
                 .AddSingleton(Commands)
                 .BuildServiceProvider();
 
-            string botToken = "MzIyMDMwMzQwMTI4NTA1ODY2.XKZ-mQ.TJR3ymgaemFE-1EKheW3Knx1fo8";
+            string botToken = Program.DiscordConfig.Token;
 
             Client.Log += Client_Log;
 
@@ -80,27 +80,75 @@ namespace JjunoInfection
         [Command("start")]
         public async Task StartAsync()
         {
-            if (Program.Initialized)
+            if (!await IsAdmin())
+                return;
+
+            if (Game.Initialized)
             {
-                await ReplyAsync("Bot already started");
+                await ReplyAsync("Error: Bot already started");
                 return;
             }
 
-            await ReplyAsync("Starting...");
-            try
+            IUserMessage botReply = await ReplyAsync("Starting... ");
+
+            _ = Task.Run(() =>
             {
-                Program.Game(true);
-            }
-            catch (OverwatchStartFailedException ex)
+                try
+                {
+                    Program.Game = new Game();
+                    Program.Game.Play();
+                }
+                catch (OverwatchStartFailedException ex)
+                {
+                    botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup failed: {ex}");
+                }
+                catch (InitializedException)
+                {
+                    botReply.ModifyAsync(msg => msg.Content = "Starting... Error: Already running!");
+                }
+                catch (OverwatchClosedException) { }
+            });
+        }
+
+        [Command("stop")]
+        public async Task StopAsync()
+        {
+            if (!await IsAdmin())
+                return;
+
+            if (Program.Game == null)
+                await ReplyAsync(Program.NotInitialized);
+            else
             {
-                await ReplyAsync($"Startup failed: {ex}");
+                if (Program.Game == null)
+                {
+                    await ReplyAsync(Program.NotInitialized);
+                    return;
+                }
+
+                IUserMessage botReply = await ReplyAsync("Stopping... ");
+                
+                _ = Task.Run(() =>
+                {
+                    Program.Game.Stop();
+                    botReply.ModifyAsync(msg => msg.Content = "Stopping... bot stopped.");
+                });
             }
         }
 
         [Command("kill")]
         public async Task KillAsync()
         {
-            await ReplyAsync("Stopped.");
+            if (!await IsAdmin())
+                return;
+
+            if (Game.UsingProcess == null)
+                await ReplyAsync("Error: No process to kill.");
+            else
+            {
+                Game.UsingProcess.CloseMainWindow();
+                IUserMessage botReply = await ReplyAsync("Killed the bot's Overwatch process.");
+            }
         }
 
         [Command("profiles")]
@@ -110,11 +158,55 @@ namespace JjunoInfection
             int whitespaceLength = Profile.ProfileList.Select(p => p.Name).OrderByDescending(n => n.Length).First().Length;
             string whitespace = new string(' ', whitespaceLength);
 
-            bool bold = false;
             foreach (Profile profile in Profile.ProfileList)
                 lines.Add($"{profile.Name}{whitespace.Substring(profile.Name.Length)} ${profile.JBucks}");
 
             await ReplyAsync($"```{string.Join("\n", lines)}```");
+        }
+
+        [Command("join")]
+        public async Task JoinAsync(string battletag)
+        {
+            if (Program.Game == null)
+            {
+                await ReplyAsync(Program.NotInitialized);
+                return;
+            }
+
+            if (CustomGame.PlayerExists(battletag))
+            {
+                Program.Game.InviteToGame.Add(battletag);
+                await ReplyAsync("Inviting to game...");
+            }
+            else
+                await ReplyAsync($"Could not find the player {battletag}.");
+        }
+
+        [Command("help")]
+        public async Task HelpAsync()
+        {
+            string[] help = new string[]
+            {
+                "Commands:",
+                "    join <battletag>  Join the game. Battletag is case sensitive.",
+                "    profiles          List all profiles and their worth.",
+                "  Admins:",
+                "    start             Start the bot.",
+                "    stop              Stop the bot.",
+                "    kill              Kill the Overwatch process the bot is using.",
+            };
+            await ReplyAsync($"```{string.Join("\n", help)}```");
+        }
+
+        private async Task<bool> IsAdmin()
+        {
+            string fullname = Context.User.Username.ToLower() + "#" + Context.User.Discriminator;
+            bool isAdmin = Program.DiscordConfig?.Admins?.Contains(fullname) ?? false;
+
+            if (!isAdmin)
+                await ReplyAsync("Error: Not authorized.");
+
+            return isAdmin;
         }
     }
 }

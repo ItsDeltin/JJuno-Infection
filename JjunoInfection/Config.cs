@@ -9,103 +9,93 @@ using Deltin.CustomGameAutomation;
 
 namespace JjunoInfection
 {
-    public class Config
+    class Config
     {
-        public static Config ParseConfig()
+        public static GeneralConfig ParseConfig()
         {
             string configLocation = AppDomain.CurrentDomain.BaseDirectory + "/config.xml";
 
             if (!File.Exists(configLocation))
-            {
-                Log("Could not find config file, using defaults.");
-                return new Config();
-            }
+                return new GeneralConfig();
 
             XDocument document = XDocument.Load(configLocation);
 
-            return new Config()
-            {
-                PresetName = ParseString(document, "presetName", "Jjuno Infection"),
-                PlayerCount = ParseInt(document, "playerCount", 3, 12, 8),
-                RoundCount = ParseInt(document, "roundCount", 1, 9, 5),
+            var config = new GeneralConfig();
 
-                BattlenetExecutable = ParseString(document, "battlenetExecutable", @"C:\Program Files (x86)\Blizzard App\Battle.net.exe"),
-                OverwatchSettingsFile = ParseString(document, "overwatchSettingsFile", @"C:\Users\{username}\Documents\Overwatch\Settings\Settings_v0.ini"),
+            ParseString(ref config.PresetName, document, "presetName");
+            ParseString(ref config.BattlenetExecutable, document, "battlenetExecutable");
+            ParseString(ref config.OverwatchSettingsFile, document, "overwatchSettingsFile");
+            config.OverwatchSettingsFile = config.OverwatchSettingsFile?.Replace("{username}", Environment.UserName);
+            ParseInt(ref config.PlayerCount, document, "playerCount", 3, 12);
+            ParseInt(ref config.RoundCount, document, "roundCount", 1, 9);
+            ParseInt(ref config.MinPlayers, document, "minPlayers", 3, 12);
+
+            return config;
+        }
+
+        public static DiscordConfig ParseDiscordConfig()
+        {
+            string configLocation = AppDomain.CurrentDomain.BaseDirectory + "/discord.xml";
+
+            if (!File.Exists(configLocation))
+                return new DiscordConfig();
+
+            XDocument document = XDocument.Load(configLocation);
+
+            var config = new DiscordConfig()
+            {
+                Token = GetElement(document, "token")?.Attribute("value")?.Value
             };
+
+            ParseStrings(ref config.Admins, document, name: "admins");
+
+            Console.WriteLine($"Bot admins: {string.Join(", ", config.Admins)}");
+
+            return config;
         }
 
-        private static void Log(string text)
+        private static XElement GetElement(XDocument document, string name)
         {
-            Console.WriteLine("[Config] " + text);
+            return document.Element("config")?.Element(name);
         }
-
-        private static string ParseString(XDocument document, string name, params string[] validValues)
+        private static string GetValue(XDocument document, string name)
         {
-            string elementValue = document.Element("config")?.Element(name)?.Value?.ToLower();
-            if (elementValue == null || !validValues.Contains(elementValue))
-            {
-                Log($"{name} is not {string.Join(", ", validValues)}. Using {validValues[0]} by default.");
-                return validValues[0];
-            }
-            return elementValue;
+            return GetElement(document, name)?.Value;
         }
 
-        private static string ParseString(XDocument document, string name, string @default)
+        private static void ParseString(ref string value, XDocument document, string name)
         {
-            string elementValue = document.Element("config")?.Element(name)?.Value?.ToLower();
-            if (elementValue == null)
-            {
-                Log($"Could not get {name}. Using {@default} by default.");
-                return @default;
-            }
-            return elementValue;
+            string elementValue = GetValue(document, name);
+            if (elementValue != null)
+                value = elementValue;
         }
 
-        private static T ParseString<T>(XDocument document, string name, T @default) where T : struct
+        private static void ParseStrings(ref string[] value, XDocument document, string name)
         {
-            T value;
-            if (!Enum.TryParse(document.Element("config")?.Element(name)?.Value, true, out value))
-            {
-                Log($"Could not get {name}. Using {@default} by default.");
-                value = @default;
-            }
-            return value;
+            value = GetValue(document, name)?.Split(',').Select(n => n.ToLower().Trim()).ToArray() ?? value;
         }
 
-        private static int ParseInt(XDocument document, string name, int min, int max, int @default)
+        private static void ParseInt(ref int value, XDocument document, string name, int min, int max)
         {
-            int value;
-            if (int.TryParse(document.Element("config")?.Element(name)?.Value, out value))
-            {
-                if (value < min || value > max)
-                {
-                    Log($"{name} ({value}) is less than {min} or greater than {max}. Using {@default} by default.");
-                    value = @default;
-                }
-            }
-            else
-            {
-                Log($"Could not get {name}. Using {@default} by default.");
-                value = @default;
-            }
-            return value;
+            if (int.TryParse(GetValue(document, name), out int newvalue) && newvalue >= min && newvalue <= max)
+                value = newvalue;
         }
+    }
 
-        private static bool ParseBool(XDocument document, string name)
-        {
-            return ParseString(document, name, "false", "true") == "true";
-        }
-
-        private static bool Exists(XDocument document, string name)
-        {
-            return document.Element("config")?.Element(name) != null;
-        }
-
+    class GeneralConfig
+    {
         public string PresetName = "Jjuno Infection";
         public int PlayerCount = 8;
+        public int MinPlayers = 4;
         public int RoundCount = 5;
 
         public string BattlenetExecutable = @"C:\Program Files (x86)\Blizzard App\Battle.net.exe";
-        public string OverwatchSettingsFile = @"C:\Users\{username}\Documents\Overwatch\Settings\Settings_v0.ini";
+        public string OverwatchSettingsFile = @"C:\Users\{username}\Documents\Overwatch\Settings\Settings_v0.ini".Replace("{username}", Environment.UserName);
+    }
+
+    class DiscordConfig
+    {
+        public string Token = null;
+        public string[] Admins;
     }
 }

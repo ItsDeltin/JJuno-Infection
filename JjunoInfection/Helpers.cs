@@ -30,5 +30,23 @@ namespace JjunoInfection
             a[0] = char.ToUpper(a[0]);
             return new string(a);
         }
+
+        // Makes each line of text a new line for Overwatch.
+        public static string FormatMessage(params string[] text)
+        {
+            string newLine = string.Concat(Enumerable.Repeat("\u3000", 30));
+
+            string result = "";
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (i < text.Length - 1)
+                    result += text[i] + " " + (text[i].Length * 0.80 < newLine.Length ? newLine.Substring((int)(text[i].Length * 0.80)) : "");
+                else
+                    result += text[i];
+            }
+
+            return result;
+        }
+
     }
 }
