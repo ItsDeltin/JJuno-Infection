@@ -14,7 +14,7 @@ namespace JjunoInfection
         public static GeneralConfig Config = JjunoInfection.Config.ParseConfig();
         public static DiscordConfig DiscordConfig = JjunoInfection.Config.ParseDiscordConfig();
         public static Game Game;
-        public const string NotInitialized = "Error: Bot is not running.";
+        public static Task GameTask;
 
         static void Main(string[] args)
         {
@@ -45,7 +45,7 @@ namespace JjunoInfection
                                     aiSlots.Add(aislot);
                         }
 
-                        Task.Run(() =>
+                        GameTask = Task.Run(() =>
                         {
                             try
                             {
@@ -72,6 +72,10 @@ namespace JjunoInfection
                             {
                                 Console.WriteLine("Error: No Overwatch Process!");
                             }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error: Unhandled exception: " + ex);
+                            }
                         });
 
                         break;
@@ -90,7 +94,7 @@ namespace JjunoInfection
                         if (Game?.AISlots != null)
                             Console.WriteLine($"Filler slots: {string.Join(", ", Game.AISlots.OrderBy(slot => slot))}");
                         else
-                            Console.WriteLine(NotInitialized);
+                            Console.WriteLine(Constants.ErrorNotInitialized);
                         break;
 
                     case "profiles":

@@ -91,11 +91,12 @@ namespace JjunoInfection
 
             IUserMessage botReply = await ReplyAsync("Starting... ");
 
-            _ = Task.Run(() =>
+            Program.GameTask = Task.Run(() =>
             {
                 try
                 {
                     Program.Game = new Game();
+                    Program.Game.SetupCompleted += (sender, e) => Game_SetupCompleted(sender, e, botReply);
                     Program.Game.Play();
                 }
                 catch (OverwatchStartFailedException ex)
@@ -114,6 +115,11 @@ namespace JjunoInfection
             });
         }
 
+        private void Game_SetupCompleted(object sender, EventArgs e, IUserMessage botReply)
+        {
+            botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup finished!");
+        }
+
         [Command("stop")]
         public async Task StopAsync()
         {
@@ -121,7 +127,7 @@ namespace JjunoInfection
                 return;
 
             if (Program.Game == null)
-                await ReplyAsync(Program.NotInitialized);
+                await ReplyAsync(Constants.ErrorNotInitialized);
             else
             {
                 IUserMessage botReply = await ReplyAsync("Stopping... ");
@@ -129,6 +135,7 @@ namespace JjunoInfection
                 _ = Task.Run(() =>
                 {
                     Program.Game.Stop();
+                    Program.GameTask.Wait();
                     botReply.ModifyAsync(msg => msg.Content = "Stopping... bot stopped.");
                 });
             }
@@ -167,7 +174,7 @@ namespace JjunoInfection
         {
             if (Program.Game == null)
             {
-                await ReplyAsync(Program.NotInitialized);
+                await ReplyAsync(Constants.ErrorNotInitialized);
                 return;
             }
 
@@ -185,7 +192,7 @@ namespace JjunoInfection
         {
             if (Program.Game == null)
             {
-                await ReplyAsync(Program.NotInitialized);
+                await ReplyAsync(Constants.ErrorNotInitialized);
                 return;
             }
 

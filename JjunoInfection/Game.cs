@@ -14,19 +14,20 @@ namespace JjunoInfection
         const int StartSwappingAfter = 30; // Seconds
         const int ZombieCount = 2;
 
-        static Random RandomMap = new Random();
-        static OWEvent OverwatchEvent = OWEvent.None;
         public static bool Initialized { get { lock (InitLock) return _init; } set { _init = value; } }
-        static bool _init = false;
-        static object InitLock = new object();
         public static Process UsingProcess;
+        private static Random RandomMap = new Random();
+        private static OWEvent OverwatchEvent = OWEvent.None;
+
+        private static bool _init = false;
+        private static object InitLock = new object();
+
+        public GameState GameState = GameState.InitialSetup;
+        public List<int> AISlots;
+        public List<string> InviteToGame = new List<string>();
+        private CancellationTokenSource CancelSource = new CancellationTokenSource();
 
         public int CurrentRound { get; private set; }
-        public List<int> AISlots;
-        public GameState GameState = GameState.InitialSetup;
-        CancellationTokenSource CancelSource = new CancellationTokenSource();
-        public List<string> InviteToGame = new List<string>();
-
         // Discord !gameinfo data
         public int       GIWaitingCount  { get; private set; }
         public int       GISurvivorCount { get; private set; }
@@ -147,6 +148,8 @@ namespace JjunoInfection
 
                     cancelToken.ThrowIfCancellationRequested();
 
+                    SetupCompleted.Invoke(this, null);
+
                     // Set up the game
                     SetupGame(cg, ref startingZombies, cancelToken);
 
@@ -263,8 +266,10 @@ namespace JjunoInfection
                                 // Add jbucks to profile
                                 var zombieSlots = cg.GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).ToList();
                                 if (roundBonus > 0)
-                                    foreach (int zombieSlot in zombieSlots)
-                                        Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {CurrentRound + 1} rounds.", roundBonus);
+                                    //foreach (int zombieSlot in zombieSlots)
+                                    //    Profile.GetProfileFromSlot(cg, zombieSlot)?.Award(cg, $"Won in {CurrentRound + 1} rounds.", roundBonus);
+                                    foreach (Profile initialZombie in startingZombies)
+                                        initialZombie?.Award(cg, $"Won in {CurrentRound + 1} rounds.", roundBonus);
                             }
 
                             // Save all player's J-bucks to the system.
@@ -309,16 +314,16 @@ namespace JjunoInfection
                     Profile.Save();
                 }
             }
-            catch (OperationCanceledException ex)
+            catch (OperationCanceledException)
             {
                 CancelSource.Dispose();
                 CancelSource = new CancellationTokenSource();
-                throw ex;
             }
             finally
             {
                 Initialized = false;
                 Program.Game = null;
+                Program.GameTask = null;
             }
         }
 
@@ -543,6 +548,8 @@ namespace JjunoInfection
         {
             CancelSource.Cancel();
         }
+
+        public event EventHandler SetupCompleted;
     }
 
     enum GameState
