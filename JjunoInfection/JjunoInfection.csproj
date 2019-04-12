@@ -226,6 +226,7 @@
   <ItemGroup>
     <Content Include="config.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <SubType>Designer</SubType>
     </Content>
     <Content Include="discord.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

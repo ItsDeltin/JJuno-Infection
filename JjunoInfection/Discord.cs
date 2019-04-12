@@ -125,7 +125,7 @@ namespace JjunoInfection
             if (!await IsAdmin())
                 return;
 
-            if (Program.Game == null)
+            if (!Game.Initialized)
                 await ReplyAsync(Constants.ErrorNotInitialized);
             else
             {
@@ -172,25 +172,28 @@ namespace JjunoInfection
         [Command("join")]
         public async Task JoinAsync(string battletag)
         {
-            if (Program.Game == null)
+            if (!Game.Initialized)
             {
                 await ReplyAsync(Constants.ErrorNotInitialized);
                 return;
             }
 
-            if (CustomGame.PlayerExists(battletag))
+            _ = Task.Run(() =>
             {
-                Program.Game.InviteToGame.Add(battletag);
-                await ReplyAsync("Inviting to game...");
-            }
-            else
-                await ReplyAsync($"Could not find the player {battletag}.");
+                if (CustomGame.PlayerExists(battletag))
+                {
+                    Program.Game.InviteToGame.Add(battletag);
+                    ReplyAsync("Inviting to game...");
+                }
+                else
+                    ReplyAsync($"Could not find the player {battletag}.");
+            });
         }
 
         [Command("gameinfo")]
         public async Task GameInfoAsync()
         {
-            if (Program.Game == null)
+            if (!Game.Initialized)
             {
                 await ReplyAsync(Constants.ErrorNotInitialized);
                 return;
