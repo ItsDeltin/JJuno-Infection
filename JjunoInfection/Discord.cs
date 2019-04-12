@@ -107,7 +107,6 @@ namespace JjunoInfection
                 {
                     botReply.ModifyAsync(msg => msg.Content = "Starting... Error: Already running!");
                 }
-                catch (OverwatchClosedException) { }
                 catch (Exception ex)
                 {
                     botReply.ModifyAsync(msg => msg.Content = $"Starting... Error: {ex}");
@@ -152,6 +151,7 @@ namespace JjunoInfection
             else
             {
                 Game.UsingProcess.CloseMainWindow();
+                Game.UsingProcess = null;
                 IUserMessage botReply = await ReplyAsync("Killed the bot's Overwatch process.");
             }
         }

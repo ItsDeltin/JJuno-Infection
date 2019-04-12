@@ -60,38 +60,39 @@ namespace JjunoInfection
 
             try
             {
-                CustomGame cg;
-
-                UsingProcess = CustomGame.GetOverwatchProcess();
-                bool createdCustomGame = false;
-                if (UsingProcess == null)
-                {
-                    createdCustomGame = true;
-                    try
-                    {
-                        UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
-                        {
-                            AutomaticallyCreateCustomGame = true,
-                            CloseOverwatchProcessOnFailure = true,
-                            BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
-                            OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
-                        });
-                    }
-                    catch (System.IO.FileNotFoundException)
-                    {
-                        throw new OverwatchStartFailedException("Could not find vital file for starting Overwatch.");
-                    }
-                }
-                cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
-
-                // Round variables
-                bool gameOver = false;
-                bool roundOver = false;
-                List<Tuple<int, bool>> vaccinated = new List<Tuple<int, bool>>();
-                Profile[] startingZombies = new Profile[ZombieCount];
+                CustomGame cg = null;
 
                 try
                 {
+                    #region Game
+                    UsingProcess = CustomGame.GetOverwatchProcess();
+                    bool createdCustomGame = false;
+                    if (UsingProcess == null)
+                    {
+                        createdCustomGame = true;
+                        try
+                        {
+                            UsingProcess = CustomGame.StartOverwatch(new OverwatchInfoAuto()
+                            {
+                                AutomaticallyCreateCustomGame = true,
+                                CloseOverwatchProcessOnFailure = true,
+                                BattlenetExecutableFilePath = Program.Config.BattlenetExecutable,
+                                OverwatchSettingsFilePath = Program.Config.OverwatchSettingsFile
+                            });
+                        }
+                        catch (System.IO.FileNotFoundException)
+                        {
+                            throw new OverwatchStartFailedException("Could not find vital file for starting Overwatch.");
+                        }
+                    }
+                    cg = new CustomGame(new CustomGameBuilder() { OverwatchProcess = UsingProcess });
+
+                    // Round variables
+                    bool gameOver = false;
+                    bool roundOver = false;
+                    List<Tuple<int, bool>> vaccinated = new List<Tuple<int, bool>>();
+                    Profile[] startingZombies = new Profile[ZombieCount];
+
                     cancelToken.ThrowIfCancellationRequested();
 
                     // Set the OnGameOver and OnRoundOver events.
@@ -99,9 +100,9 @@ namespace JjunoInfection
                     cg.OnRoundOver += (sender, e) => Cg_OnRoundOver(ref roundOver, sender, e);
 
                     // Setup commands
-                    ListenTo ShopCommand      = new ListenTo("$SHOP",      listen: true,  getNameAndProfile: false, checkIfFriend: false, callback: (cd) => Command_Shop(cg, cd));
-                    ListenTo BalanceCommand   = new ListenTo("$BALANCE",   listen: true,  getNameAndProfile: true,  checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
-                    ListenTo VaccinateCommand = new ListenTo("$VACCINATE", listen: false, getNameAndProfile: true,  checkIfFriend: false, callback: (cd) => Command_Vaccinate(cg, cd, vaccinated));
+                    ListenTo ShopCommand = new ListenTo("$SHOP", listen: true, getNameAndProfile: false, checkIfFriend: false, callback: (cd) => Command_Shop(cg, cd));
+                    ListenTo BalanceCommand = new ListenTo("$BALANCE", listen: true, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Balance(cg, cd));
+                    ListenTo VaccinateCommand = new ListenTo("$VACCINATE", listen: false, getNameAndProfile: true, checkIfFriend: false, callback: (cd) => Command_Vaccinate(cg, cd, vaccinated));
                     cg.Commands.Listen = true;
                     cg.Commands.ListenTo.Add(ShopCommand);
                     cg.Commands.ListenTo.Add(BalanceCommand);
@@ -307,28 +308,29 @@ namespace JjunoInfection
                             roundOver = false;
                         }
                     }
+                    #endregion
+                }
+                catch (OperationCanceledException)
+                {
+                    CancelSource.Dispose();
+                    CancelSource = new CancellationTokenSource();
                 }
                 finally
                 {
-                    cg.Dispose();
+                    if (cg != null)
+                        cg.Dispose();
                     Profile.Save();
+                    Initialized = false;
+                    Program.Game = null;
+                    Program.GameTask = null;
                 }
             }
-            catch (OperationCanceledException)
-            {
-                CancelSource.Dispose();
-                CancelSource = new CancellationTokenSource();
-            }
-            finally
-            {
-                Initialized = false;
-                Program.Game = null;
-                Program.GameTask = null;
-            }
+            catch (Exception) { throw; }
         }
 
         static void Cg_OnRoundOver(ref bool roundOver, object sender, EventArgs e)
         {
+            Thread.Sleep(500);
             roundOver = true;
         }
 
