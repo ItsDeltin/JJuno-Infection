@@ -18,10 +18,11 @@ namespace JjunoInfection
 
         static void Main(string[] args)
         {
-            Task.Run(() =>
-            {
-                new Discord().RunBotAsync().GetAwaiter().GetResult();
-            });
+            if (DiscordConfig.Enabled)
+                Task.Run(() =>
+                {
+                    new Discord().RunBotAsync().GetAwaiter().GetResult();
+                });
 
             while (true)
             {
@@ -43,6 +44,8 @@ namespace JjunoInfection
                             for (int i = 0; i < aiSlotsString.Length; i++)
                                 if (int.TryParse(aiSlotsString[i], out int aislot))
                                     aiSlots.Add(aislot);
+                            if (aiSlots.Count == 0)
+                                aiSlots = null;
                         }
 
                         GameTask = Task.Run(() =>
@@ -81,7 +84,10 @@ namespace JjunoInfection
                         break;
 
                     case "stop":
-                        Game.Stop();
+                        if (Game == null)
+                            Console.WriteLine(Constants.ERROR_NOT_INITIALIZED);
+                        else
+                            Game.Stop();
                         break;
 
                     case "save":
@@ -99,8 +105,13 @@ namespace JjunoInfection
 
                     case "profiles":
                         var profiles = Profile.ProfileList;
-                        for (int i = 0; i < profiles.Count; i++)
-                            Console.WriteLine($"  {profiles[i].Name} ${profiles[i].JBucks}");
+
+                        if (profiles.Count == 0)
+                            Console.WriteLine("Error: No profiles!");
+                        else
+                            for (int i = 0; i < profiles.Count; i++)
+                                Console.WriteLine($"  {profiles[i].Name} ${profiles[i].JBucks}");
+
                         break;
 
                     case "help":

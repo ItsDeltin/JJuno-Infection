@@ -43,14 +43,11 @@ namespace JjunoInfection
 
             XDocument document = XDocument.Load(configLocation);
 
-            var config = new DiscordConfig()
-            {
-                Token = GetElement(document, "token")?.Attribute("value")?.Value
-            };
+            var config = new DiscordConfig();
 
+            ParseBool(ref config.Enabled, document, "enabled");
+            ParseString(ref config.Token, document, "token");
             ParseStrings(ref config.Admins, document, name: "admins");
-
-            Console.WriteLine($"Bot admins: {string.Join(", ", config.Admins)}");
 
             return config;
         }
@@ -81,9 +78,16 @@ namespace JjunoInfection
             if (int.TryParse(GetValue(document, name), out int newvalue) && newvalue >= min && newvalue <= max)
                 value = newvalue;
         }
+
+        private static void ParseBool(ref bool value, XDocument document, string name)
+        {
+            string v = null;
+            ParseString(ref v, document, name);
+            value = v?.ToLower() == "true";
+        }
     }
 
-    class GeneralConfig
+    class GeneralConfig : Config
     {
         public string GameName = "JJuno Infection";
 
@@ -96,8 +100,9 @@ namespace JjunoInfection
         public string OverwatchSettingsFile = @"C:\Users\{username}\Documents\Overwatch\Settings\Settings_v0.ini".Replace("{username}", Environment.UserName);
     }
 
-    class DiscordConfig
+    class DiscordConfig : Config
     {
+        public bool Enabled = false;
         public string Token = null;
         public string[] Admins;
     }

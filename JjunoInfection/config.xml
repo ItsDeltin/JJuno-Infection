@@ -4,7 +4,7 @@
   
   <presetName>Jjuno Infection</presetName>
   <playerCount>8</playerCount>
-  <minPlayers>4</minPlayers>
+  <minPlayers>3</minPlayers>
   <roundCount>5</roundCount>
   
   <!-- File locations -->

@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Deltin.CustomGameAutomation;
 
 namespace JjunoInfection
@@ -120,9 +121,6 @@ namespace JjunoInfection
                     // Join the match channel.
                     cg.Chat.SwapChannel(Channel.Match);
 
-                    // Load the infection preset.
-                    cg.Settings.LoadPreset(Program.Config.PresetName);
-
                     // Set join setting
                     cg.Settings.JoinSetting = Join.FriendsOnly;
 
@@ -131,6 +129,11 @@ namespace JjunoInfection
                     // Add AI and set game name/team names if the custom game was created.
                     if (createdCustomGame)
                     {
+                        // Load the infection preset.
+                        cg.Settings.LoadPreset(Program.Config.PresetName);
+
+                        cancelToken.ThrowIfCancellationRequested();
+
                         // Set Game Name
                         try
                         {
@@ -140,9 +143,13 @@ namespace JjunoInfection
                         {
                             Console.WriteLine($"Error: {Program.Config.GameName} is an invalid game name.");
                         }
+
                         // Set Team Names
                         cg.Settings.SetTeamName(Team.Blue, Constants.TEAM_NAME_SURVIVORS);
                         cg.Settings.SetTeamName(Team.Red, Constants.TEAM_NAME_ZOMBIES);
+
+                        cancelToken.ThrowIfCancellationRequested();
+
                         // Add AI
                         cg.Interact.Move(0, 12);
                         cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, 12 - Program.Config.PlayerCount);
@@ -164,7 +171,7 @@ namespace JjunoInfection
 
                     cancelToken.ThrowIfCancellationRequested();
 
-                    SetupCompleted.Invoke(this, null);
+                    SetupCompleted?.Invoke(this, null);
 
                     // Set up the game
                     SetupGame(cg, ref startingZombies, cancelToken);
@@ -309,6 +316,9 @@ namespace JjunoInfection
                             // Indent current round.
                             CurrentRound++;
 
+                            // Remove vaccine powerups
+                            
+
                             // Activate vaccine powerups
                             for (int i = 0; i < vaccinated.Count; i++)
                                 vaccinated[i] = new Tuple<int, bool>(vaccinated[i].Item1, true);
@@ -341,7 +351,11 @@ namespace JjunoInfection
                     Program.GameTask = null;
                 }
             }
-            catch (Exception) { throw; }
+            catch (Exception ex)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException ?? ex).Throw();
+                //throw;
+            }
         }
 
         static void Cg_OnRoundOver(ref bool roundOver, object sender, EventArgs e)
@@ -444,7 +458,7 @@ namespace JjunoInfection
                 }
                 if (moveSlot == -1)
                 {
-                    zombieProfile = Profile.GetProfileFromSlot(cg, 0);
+                    zombieProfile = Profile.GetProfileFromSlot(cg, survivorSlots[0]);
                     moveSlot = survivorSlots[0];
                 }
 
@@ -463,7 +477,7 @@ namespace JjunoInfection
                 // Wait for the slots to update then get the new zombie count.
                 currentZombieCount = cg./*GetCount*/GetSlots(SlotFlags.Red /*| SlotFlags.PlayersOnly*/).Where(slot => !AISlots.Contains(slot)).Count();
             }
-            newStartingZombies = startingZombies;
+            startingZombies = newStartingZombies;
 
             cancelToken.ThrowIfCancellationRequested();
 
@@ -483,10 +497,7 @@ namespace JjunoInfection
             cg.Chat.SendChatMessage(Constants.MESSAGE_RULES);
 
             // Write the names of the starting zombies to the chat.
-            string[] startingZombieNames = startingZombies.Select(sz => sz?.Name).ToArray();
-            for (int i = 0; i < startingZombieNames.Length; i++)
-                if (startingZombieNames[i] == null)
-                    startingZombieNames[i] = "<unknown>";
+            string[] startingZombieNames = startingZombies.Select(sz => sz?.Name ?? "<unknown>").ToArray();
 
             if (startingZombieNames.Length > 0)
                 cg.Chat.SendChatMessage($"{Helpers.CommaSeperate(startingZombieNames)} {(startingZombieNames.Length == 1 ? "is" : "are")} the starting zombie{(startingZombieNames.Length == 1 ? "" : "s")}!");

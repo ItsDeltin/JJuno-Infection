@@ -96,7 +96,7 @@ namespace JjunoInfection
                 try
                 {
                     Program.Game = new Game();
-                    Program.Game.SetupCompleted += (sender, e) => Game_SetupCompleted(sender, e, botReply);
+                    Program.Game.SetupCompleted += setupCompleted; //(sender, e) => Game_SetupCompleted(sender, e, botReply);
                     Program.Game.Play();
                 }
                 catch (OverwatchStartFailedException ex)
@@ -112,11 +112,12 @@ namespace JjunoInfection
                     botReply.ModifyAsync(msg => msg.Content = $"Starting... Error: {ex}");
                 }
             });
-        }
 
-        private void Game_SetupCompleted(object sender, EventArgs e, IUserMessage botReply)
-        {
-            botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup finished!");
+            void setupCompleted(object sender, EventArgs e)
+            {
+                botReply.ModifyAsync(msg => msg.Content = $"Starting... Startup finished!");
+                Program.Game.SetupCompleted -= setupCompleted;
+            }
         }
 
         [Command("stop")]
@@ -183,7 +184,7 @@ namespace JjunoInfection
                 if (CustomGame.PlayerExists(battletag))
                 {
                     Program.Game.InviteToGame.Add(battletag);
-                    ReplyAsync("Inviting to game...");
+                    ReplyAsync($"Inviting {battletag.Split('#')[0]} to the game...");
                 }
                 else
                     ReplyAsync($"Could not find the player {battletag}.");
