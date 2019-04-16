@@ -94,7 +94,7 @@ namespace JjunoInfection
                         if (Game?.AISlots != null)
                             Console.WriteLine($"Filler slots: {string.Join(", ", Game.AISlots.OrderBy(slot => slot))}");
                         else
-                            Console.WriteLine(Constants.ErrorNotInitialized);
+                            Console.WriteLine(Constants.ERROR_NOT_INITIALIZED);
                         break;
 
                     case "profiles":

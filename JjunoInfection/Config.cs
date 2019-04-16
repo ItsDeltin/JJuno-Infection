@@ -22,6 +22,7 @@ namespace JjunoInfection
 
             var config = new GeneralConfig();
 
+            ParseString(ref config.GameName, document, "gameName");
             ParseString(ref config.PresetName, document, "presetName");
             ParseString(ref config.BattlenetExecutable, document, "battlenetExecutable");
             ParseString(ref config.OverwatchSettingsFile, document, "overwatchSettingsFile");
@@ -84,6 +85,8 @@ namespace JjunoInfection
 
     class GeneralConfig
     {
+        public string GameName = "JJuno Infection";
+
         public string PresetName = "Jjuno Infection";
         public int PlayerCount = 8;
         public int MinPlayers = 4;

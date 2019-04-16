@@ -126,7 +126,7 @@ namespace JjunoInfection
                 return;
 
             if (!Game.Initialized)
-                await ReplyAsync(Constants.ErrorNotInitialized);
+                await ReplyAsync(Constants.ERROR_NOT_INITIALIZED);
             else
             {
                 IUserMessage botReply = await ReplyAsync("Stopping... ");
@@ -174,7 +174,7 @@ namespace JjunoInfection
         {
             if (!Game.Initialized)
             {
-                await ReplyAsync(Constants.ErrorNotInitialized);
+                await ReplyAsync(Constants.ERROR_NOT_INITIALIZED);
                 return;
             }
 
@@ -195,7 +195,7 @@ namespace JjunoInfection
         {
             if (!Game.Initialized)
             {
-                await ReplyAsync(Constants.ErrorNotInitialized);
+                await ReplyAsync(Constants.ERROR_NOT_INITIALIZED);
                 return;
             }
 

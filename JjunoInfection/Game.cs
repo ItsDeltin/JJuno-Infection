@@ -65,6 +65,8 @@ namespace JjunoInfection
                 try
                 {
                     #region Game
+                    #region Initial Setup
+
                     UsingProcess = CustomGame.GetOverwatchProcess();
                     bool createdCustomGame = false;
                     if (UsingProcess == null)
@@ -126,15 +128,28 @@ namespace JjunoInfection
 
                     cancelToken.ThrowIfCancellationRequested();
 
-                    // Add AI if the custom game was created.
+                    // Add AI and set game name/team names if the custom game was created.
                     if (createdCustomGame)
                     {
+                        // Set Game Name
+                        try
+                        {
+                            cg.Settings.SetGameName(Program.Config.GameName);
+                        }
+                        catch (Exception e) when (e is ArgumentException || e is ArgumentOutOfRangeException)
+                        {
+                            Console.WriteLine($"Error: {Program.Config.GameName} is an invalid game name.");
+                        }
+                        // Set Team Names
+                        cg.Settings.SetTeamName(Team.Blue, Constants.TEAM_NAME_SURVIVORS);
+                        cg.Settings.SetTeamName(Team.Red, Constants.TEAM_NAME_ZOMBIES);
+                        // Add AI
                         cg.Interact.Move(0, 12);
                         cg.AI.AddAI(AIHero.Bastion, Difficulty.Easy, Team.BlueAndRed, 12 - Program.Config.PlayerCount);
                         cg.WaitForSlotUpdate();
                         AISlots = cg.GetSlots(SlotFlags.BlueAndRed);
                     }
-                    // If the AI slots were not pre-filled, attempt to get them automatically. This can be inaccurate,
+                    // If the AI slots were not pre-filled, attempt to get them automatically. This can be inaccurate.
                     else if (AISlots == null)
                     {
                         AISlots = cg.GetSlots(SlotFlags.BlueAndRed | SlotFlags.AIOnly);
@@ -155,6 +170,7 @@ namespace JjunoInfection
                     SetupGame(cg, ref startingZombies, cancelToken);
 
                     VaccinateCommand.Listen = true;
+                    #endregion
 
                     for (; ; )
                     {
@@ -201,7 +217,7 @@ namespace JjunoInfection
                             // All survivors are dead, zombies win.
                             gameOver = true;
                             survivorsWin = false;
-                            cg.Chat.SendChatMessage("Survivors lose gg");
+                            cg.Chat.SendChatMessage(Constants.MESSAGE_SURVIVORS_LOSE);
                         }
 
                         // Update discord info
@@ -276,7 +292,7 @@ namespace JjunoInfection
                             // Save all player's J-bucks to the system.
                             Profile.Save();
 
-                            cg.Chat.SendChatMessage("Be notified of the next Zombie game! Join our discord http://discord.gg/xTVeqm");
+                            cg.Chat.SendChatMessage(Constants.MESSAGE_DISCORD);
 
                             cancelToken.ThrowIfCancellationRequested();
 
@@ -303,7 +319,7 @@ namespace JjunoInfection
                             Thread.Sleep(StartSwappingAfter * 1000);
 
                             if (CurrentRound == Program.Config.RoundCount)
-                                cg.Chat.SendChatMessage("Last round, good luck!");
+                                cg.Chat.SendChatMessage(Constants.MESSAGE_LAST_ROUND);
 
                             roundOver = false;
                         }
@@ -463,6 +479,9 @@ namespace JjunoInfection
 
             cancelToken.ThrowIfCancellationRequested();
 
+            // Write the rules to the chat.
+            cg.Chat.SendChatMessage(Constants.MESSAGE_RULES);
+
             // Write the names of the starting zombies to the chat.
             string[] startingZombieNames = startingZombies.Select(sz => sz?.Name).ToArray();
             for (int i = 0; i < startingZombieNames.Length; i++)
@@ -532,11 +551,11 @@ namespace JjunoInfection
                 {
                     int left = Program.Config.MinPlayers - playerCount;
                     if (left > 1)
-                        cg.Chat.SendChatMessage($"Welcome, insert rules here later. Waiting for {left} more players.");
+                        cg.Chat.SendChatMessage($"Welcome! Waiting for {left} more players.");
                     if (left == 1)
-                        cg.Chat.SendChatMessage($"Welcome, insert rules here later. Waiting for 1 more player.");
+                        cg.Chat.SendChatMessage($"Welcome! Waiting for 1 more player.");
                     if (left < 1)
-                        cg.Chat.SendChatMessage($"Welcome, insert rules here later.");
+                        cg.Chat.SendChatMessage($"Welcome! The game will be starting shortly...");
                 }
                 previousPlayerCount = playerCount;
                 GIWaitingCount = playerCount;

@@ -1,5 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <config>
+  <gameName>JJuno Infection!</gameName>
+  
   <presetName>Jjuno Infection</presetName>
   <playerCount>8</playerCount>
   <minPlayers>4</minPlayers>
